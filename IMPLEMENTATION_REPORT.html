@@ -16,7 +16,7 @@
   <ul>
     <li>A simplified, puzzle-first interface inspired by the supplied editorial reference: a compact rounded header, a large uncluttered puzzle canvas, and colorful pill tabs.</li>
     <li>Workspace, Agents, API keys, puzzle selection, and trace inspection are now on-demand drawers rather than permanent panels. This preserves screen space for future browser-attached agent runs.</li>
-    <li>Four Sokoban challenges and three maze challenges, each with a local path/route solver for a no-key demo.</li>
+    <li>Seven Sokoban challenges (including an imported, attributed Microban puzzle and a playable interpretation inspired by the supplied warehouse image) plus three maze challenges. The newly added logic boards were checked against the local solver.</li>
     <li>Two numbered Klotski boards. Long tiles are explicitly labelled; commands such as <code>1R</code> are shown in the run strip, and invalid cross-axis movement is rejected.</li>
     <li>Four jigsaw boards: two 9-piece (3 × 3) and two 16-piece (4 × 4) visual environments. Tiles are selected and placed using a virtual-mouse-style interaction. The Agents drawer can hide or reveal the reference image.</li>
     <li>Local-only API-key configuration through <code>.env.local</code>, a small Node server, and an API status endpoint that never returns key values.</li>
@@ -25,7 +25,7 @@
   <p>The local demo agent receives the canonical grid state, runs breadth-first search over legal player moves and crate pushes, then visibly applies its found route one action at a time. This makes the browser demo deterministic, free to run, and testable without an API key.</p>
   <pre>observe board → find shortest legal state path → animate actions
 → record timeline/trace → check all goals → complete</pre>
-  <p>When “Delegate alternatives” is selected, the app also creates two child-workspace reports: one rejects a risky direction and one returns the verified route. These agents are intentionally display-level simulations for the frontend build; the production runtime described in <a href="AGENT_ARCADE_REPORT.md">AGENT_ARCADE_REPORT.md</a> replaces them with independently scheduled model calls and snapshots.</p>
+  <p>For the no-key demo, “Delegate alternatives” creates visible child-workspace reports. With Claude selected, the local server instead runs a real bounded tool loop: observe board, spawn explorer, write a temporary helper artifact, request a deterministic solver plan, and apply legal moves. The browser shows only short public activity and explorer reports, not private reasoning.</p>
   <h2>Visual and interaction design</h2>
   <p>The Sokoban board uses visual crate, goal, wall, and player affordances inspired by <code>Images/Sokoban1.png</code>, without copying its image content. The Klotski board uses a wood, grid, highlighted target, and exit treatment inspired by <code>Images/Klotski1.jpeg</code> and <code>Images/Klotski2.jpeg</code>.</p>
   <h2>Run it locally</h2>
@@ -33,9 +33,11 @@
 node server.mjs
 # open http://127.0.0.1:4173</pre>
   <p>No package installation is needed. See <a href="API_SETUP.md">API_SETUP.md</a> to add your own local OpenAI and Anthropic keys without sharing them in chat.</p>
+  <h2>Live provider and jigsaw checks</h2>
+  <p>The local Claude integration was exercised on the advanced three-crate Sokoban: it spawned an Explorer workspace, wrote a private helper note, requested a verified 11-move plan, and solved the visible board. The 16-piece cat jigsaw was tested with the reference supplied (the model returned a region-by-region visual inventory and virtual placements), and again with the reference withheld (the model produced an exploration plan and made zero placements). The cat asset and level provenance are recorded in <a href="SOURCES.md">SOURCES.md</a>.</p>
   <h2>Known next runtime layer</h2>
-  <table><tr><th>Included now</th><th>Next integration</th></tr><tr><td class="ok">Playable puzzle engines and local solver</td><td>Server-side OpenAI Agents SDK runtime with BYOK requests</td></tr><tr><td class="ok">Workspace tree and child reports</td><td>Real concurrent subagents, snapshots, messaging, and budgets</td></tr><tr><td class="ok">Long-axis visual puzzle UI</td><td>Screenshot/virtual-mouse harness and jigsaw environment</td></tr><tr><td class="ok">Local run trace and replayable state model</td><td>Persisted run history and provider comparison</td></tr></table>
+  <table><tr><th>Included now</th><th>Next integration</th></tr><tr><td class="ok">Playable puzzle engines, level picker, and local solver</td><td>OpenAI puzzle runner using the Agents SDK/custom model adapter</td></tr><tr><td class="ok">Claude tool-loop with explorer, temporary workspace artifact, and verified actions</td><td>Parallel subagent scheduling, budgets, and persisted run history</td></tr><tr><td class="ok">Cat 3 × 3 / 4 × 4 jigsaw, reference and honest no-reference modes</td><td>Board screenshot observation and real drag/click selection for visual agents</td></tr><tr><td class="ok">On-demand traces, workspaces, API status, and puzzle drawers</td><td>Provider comparison and browser-extension attachment</td></tr></table>
   <h2>Verification performed</h2>
-  <ul><li>Static JavaScript syntax and layout checks.</li><li>Browser run-through: load page, keyboard/control movement, Sokoban agent execution, reset, workspace controls, Klotski constraint behavior, completion overlay, and responsive display.</li></ul>
+  <ul><li>Static JavaScript syntax and whitespace checks.</li><li>Browser run-through: level switching; local solver on imported Microban and image-inspired warehouse boards; live Claude advanced Sokoban run with Explorer workspace; drawer controls; Klotski constraints; maze completion; and jigsaw tile placement.</li><li>Provider checks: Claude response endpoint, Claude multi-agent Sokoban flow, 16-piece cat reference analysis, and reference-withheld jigsaw no-placement behavior.</li></ul>
 </body>
 </html>

@@ -15,7 +15,8 @@
   <h2>What was built</h2>
   <ul>
     <li>A simplified, puzzle-first interface inspired by the supplied editorial reference: a compact rounded header, a large uncluttered puzzle canvas, and colorful pill tabs.</li>
-    <li>Workspace, Agents, API keys, puzzle selection, and trace inspection are now on-demand drawers rather than permanent panels. This preserves screen space for future browser-attached agent runs.</li>
+    <li>Workspace, Agents, API keys, puzzle selection, and trace inspection are on-demand drawers rather than permanent panels. The puzzle family picker now uses category tabs plus a level selector, so a 100-level collection does not become a 100-row menu.</li>
+    <li>The old marketing-copy column was removed. The puzzle canvas owns the page, with a compact identity/control bar and a live agent console that shows an animated agent, elapsed time, changing phase, and readable milestones while a model is working.</li>
     <li>Seven Sokoban challenges (including an imported, attributed Microban puzzle and a playable interpretation inspired by the supplied warehouse image) plus three maze challenges. The newly added logic boards were checked against the local solver.</li>
     <li>Two numbered Klotski boards. Long tiles are explicitly labelled; commands such as <code>1R</code> are shown in the run strip, and invalid cross-axis movement is rejected.</li>
     <li>Four jigsaw boards: two 9-piece (3 × 3) and two 16-piece (4 × 4) visual environments. Tiles are selected and placed using a virtual-mouse-style interaction. The Agents drawer can hide or reveal the reference image.</li>
@@ -38,6 +39,6 @@ node server.mjs
   <h2>Known next runtime layer</h2>
   <table><tr><th>Included now</th><th>Next integration</th></tr><tr><td class="ok">Playable puzzle engines, level picker, and local solver</td><td>OpenAI puzzle runner using the Agents SDK/custom model adapter</td></tr><tr><td class="ok">Claude tool-loop with explorer, temporary workspace artifact, and verified actions</td><td>Parallel subagent scheduling, budgets, and persisted run history</td></tr><tr><td class="ok">Cat 3 × 3 / 4 × 4 jigsaw, reference and honest no-reference modes</td><td>Board screenshot observation and real drag/click selection for visual agents</td></tr><tr><td class="ok">On-demand traces, workspaces, API status, and puzzle drawers</td><td>Provider comparison and browser-extension attachment</td></tr></table>
   <h2>Verification performed</h2>
-  <ul><li>Static JavaScript syntax and whitespace checks.</li><li>Browser run-through: level switching; local solver on imported Microban and image-inspired warehouse boards; live Claude advanced Sokoban run with Explorer workspace; drawer controls; Klotski constraints; maze completion; and jigsaw tile placement.</li><li>Provider checks: Claude response endpoint, Claude multi-agent Sokoban flow, 16-piece cat reference analysis, and reference-withheld jigsaw no-placement behavior.</li></ul>
+  <ul><li>Static JavaScript syntax and whitespace checks.</li><li>Browser run-through: category/select level switching; local solver on imported Microban and image-inspired warehouse boards; live Claude Reference warehouse run with animated status and readable 17-move trace; repaired Switchback manual movement; and reversible jigsaw placement/removal.</li><li>Provider checks: Claude response endpoint and Cat 16-piece solve; reference-withheld jigsaw no-placement behavior; OpenAI server-side verification with a generic, redacted failure message when the configured key is rejected.</li></ul>
 </body>
 </html>

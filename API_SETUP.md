@@ -24,9 +24,11 @@ If port 4173 is busy, use another local port, for example `PORT=4174 node server
 
 ## Live runs available now
 
-- **Claude / Sokoban:** the local server runs a real tool loop. The main agent can inspect the board, spawn an isolated explorer, write a small `.md` or `.py` helper artifact in a temporary workspace, ask a deterministic sandbox solver for a plan, and apply only validated moves to the browser board.
+- **Claude / Sokoban:** the local server runs a real tool loop and streams its public events to the browser as newline-delimited JSON. The main agent can inspect the board, spawn an isolated explorer, write a small `.md` or `.py` helper artifact in a temporary workspace, ask a deterministic sandbox solver for advice, and make deliberate batches of one to five validated moves. The visible board updates while the agent continues working; it is never presented as solved unless all goals are actually filled.
 - **Claude / Jigsaw:** the local server sends the cat reference only when reference mode is enabled. With it disabled, the model receives no hidden image and is deliberately prevented from placing tiles until a real board-observation tool exists.
-- **OpenAI:** `/api/test-provider` tests an OpenAI key server-side. The puzzle-specific OpenAI runner is intentionally not wired yet; the UI keeps the failure explicit rather than silently falling back to a different model.
+- **OpenAI:** `/api/test-provider` tests an OpenAI key server-side using the exact model ID selected in the Agents drawer. The puzzle-specific OpenAI runner is intentionally not wired yet; the UI keeps the limitation explicit rather than silently falling back to a different model.
+
+The Agents drawer accepts the exact model ID for the selected provider. The current live Claude default is `claude-haiku-4-5-20251001`; the default OpenAI verification model is `gpt-5.4-mini`. Each live Claude run displays accumulated input/output-token usage and a base-rate cost estimate. It is an estimate, not the provider invoice.
 
 Temporary agent artifacts live under the operating system's temporary directory, not in this repository or in the browser. They cannot execute commands or access your home folder through this app.
 

@@ -25,22 +25,26 @@ const puzzles={
   {id:'j4',name:'Night 16-piece',title:'Sixteen pieces.<br>Trust vision.',kicker:'JIGSAW · 4 × 4',n:4,art:'radial-gradient(circle at 70% 23%,#e7dd99 0 10%,transparent 11%),linear-gradient(135deg,#171e52,#8b4ca3 55%,#f49b60)'}
  ]}
 };
-let type='sokoban',levelId='s2',state,selectedPiece,selectedTile,workspaces=[{id:'main',name:'Main agent',status:'ready',parent:'Authoritative workspace'}],activeWorkspace='main',trace=[],isRunning=false,timer,modelChoice='local',strategyChoice='explore',pickerType='sokoban',liveRun={timer:null,startedAt:0,events:[]},runGeneration=0;
+const modelDefaults={local:'Local deterministic solver',claude:'claude-haiku-4-5-20251001',openai:'gpt-5.4-mini'};
+let type='sokoban',levelId='s2',state,selectedPiece,selectedTile,workspaces=[{id:'main',name:'Main agent',status:'ready',parent:'Authoritative workspace'}],activeWorkspace='main',trace=[],isRunning=false,timer,modelChoice='local',modelId=modelDefaults.local,strategyChoice='explore',pickerType='sokoban',liveRun={timer:null,startedAt:0,events:[]},runGeneration=0,lastUsage=null;
 const dirs={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
 const current=()=>puzzles[type],level=()=>current().levels.find(x=>x.id===levelId),pos=(x,y)=>`${x},${y}`;
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');clearTimeout(e.t);e.t=setTimeout(()=>e.classList.remove('show'),2400)}
-function log(label,text,kind=''){trace.unshift({label,text,kind});if($('#drawer').classList.contains('show'))renderDrawerContent()}
+function log(label,text,kind=''){trace.push({label,text,kind});if($('#drawer').classList.contains('show'))renderDrawerContent()}
 function normaliseMap(map){const width=Math.max(...map.map(row=>row.length));return map.map(row=>row.padEnd(width,'#'))}
 function parseGrid(map){let player,goal;const goals=[],crates=[];const base=normaliseMap(map).map((r,y)=>[...r].map((c,x)=>{if('.+*'.includes(c)){goals.push([x,y]);goal=[x,y]}if('$*'.includes(c))crates.push([x,y]);if('@+'.includes(c))player=[x,y];return c==='#'?'#':' '}));if(!player)throw new Error('Puzzle map has no player start.');return{base,player,goal,goals,crates,steps:0,pushes:0,solved:false}}
 function resetLiveRun(){clearInterval(liveRun.timer);liveRun={timer:null,startedAt:0,events:[]};$('#live-run-panel').hidden=true}
 function elapsed(){let seconds=Math.max(0,Math.floor((Date.now()-liveRun.startedAt)/1000));return `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`}
-function renderLiveRun(){const panel=$('#live-run-panel');if(!liveRun.startedAt){panel.hidden=true;return}panel.hidden=false;$('#live-run-elapsed').textContent=elapsed();$('#live-run-title').textContent=liveRun.title||'Agent is working on the puzzle.';$('#live-run-detail').textContent=liveRun.detail||'Preparing the next safe step.';$('#live-run-events').innerHTML=liveRun.events.slice(-4).map((event,index)=>`<li class="${index===liveRun.events.slice(-4).length-1?'current':'done'}">${event}</li>`).join('')}
+function renderLiveRun(){const panel=$('#live-run-panel');if(!liveRun.startedAt){panel.hidden=true;return}panel.hidden=false;$('#live-run-elapsed').textContent=elapsed();$('#live-run-title').textContent=liveRun.title||'Agent is working on the puzzle.';$('#live-run-detail').textContent=liveRun.detail||'Preparing the next safe step.';$('#live-run-cost').textContent=lastUsage?formatUsage(lastUsage):'cost pending';$('#live-run-events').innerHTML=liveRun.events.slice(-4).map((event,index)=>`<li class="${index===liveRun.events.slice(-4).length-1?'current':'done'}">${event}</li>`).join('')}
 function beginLiveRun(title,detail){resetLiveRun();liveRun.startedAt=Date.now();liveRun.title=title;liveRun.detail=detail;liveRun.events=['Workspace opened'];liveRun.timer=setInterval(renderLiveRun,400);renderLiveRun()}
 function updateLiveRun(title,detail,event){if(!liveRun.startedAt)return;liveRun.title=title;liveRun.detail=detail;if(event&&liveRun.events.at(-1)!==event)liveRun.events.push(event);renderLiveRun()}
 function finishLiveRun(title,detail){if(!liveRun.startedAt)return;updateLiveRun(title,detail,'Run complete');clearInterval(liveRun.timer);liveRun.timer=null;setTimeout(()=>{$('#live-run-panel').hidden=true},7000)}
 function friendlyAction(direction,index,total){return `Move ${String(index+1).padStart(2,'0')}/${String(total).padStart(2,'0')} · ${({up:'↑ Up',down:'↓ Down',left:'← Left',right:'→ Right'})[direction]||direction}`}
 function briefTrace(text,limit=180){const clean=String(text||'').replace(/[#*_`]/g,'').replace(/\s+/g,' ').trim();return clean.length>limit?`${clean.slice(0,limit-1).trim()}…`:clean}
-function init(){runGeneration++;stop(true);resetLiveRun();selectedPiece=null;selectedTile=null;const l=level();if(type==='sokoban')state=parseGrid(l.map);else if(type==='maze')state=parseGrid(l.map);else if(type==='klotski')state={pieces:structuredClone(l.pieces),steps:0,solved:false};else state={n:l.n,art:l.art,steps:0,solved:false,pieces:shuffle([...Array(l.n*l.n)].map((_,i)=>i)),placed:{},reference:true,history:[]};$('#puzzle-kicker').textContent=l.kicker;$('#arena-name').textContent=`${current().label} · ${l.name}`;$('#mode-copy').textContent=type==='jigsaw'?'Virtual mouse / vision':'Structured logic';$('#game-caption').textContent=type==='sokoban'?'Arrow keys move the keeper. Every crate must land on a target.':type==='maze'?'Arrow keys navigate to the green exit.':type==='klotski'?'Click a numbered tile, then use arrows. Example: 1R.':'Select a tile, then a destination. Click a placed tile to remove it.';$('#undo-piece-button').hidden=type!=='jigsaw';$('#step-count').textContent='00';$('#push-count').textContent='00';$('#metric-two').textContent=type==='maze'?'cells explored':type==='jigsaw'?'pieces placed':type==='klotski'?'slides':'pushes';$('#run-status').textContent='READY';$('#command-value').textContent='—';log('BOARD READY',`${l.name} is loaded in the main workspace.`);renderBoard();renderCards()}
+function formatUsage(usage){if(!usage)return '—';const c=usage.estimatedCostUsd;return Number.isFinite(c)?`~$${c<.1?c.toFixed(4):c.toFixed(2)}`:'tokens tracked'}
+function setUsage(usage){if(!usage)return;lastUsage=usage;$('#run-cost').textContent=formatUsage(usage);renderLiveRun()}
+function resetRunContext(){trace=[];lastUsage=null;workspaces=[{id:'main',name:'Main agent',status:'ready',parent:'Authoritative workspace'}];activeWorkspace='main';$('#agent-count').textContent='1';$('#active-workspace').textContent='Main agent';$('#run-cost').textContent='—'}
+function init(){runGeneration++;stop(true);resetLiveRun();resetRunContext();selectedPiece=null;selectedTile=null;const l=level();if(type==='sokoban')state=parseGrid(l.map);else if(type==='maze')state=parseGrid(l.map);else if(type==='klotski')state={pieces:structuredClone(l.pieces),steps:0,solved:false};else state={n:l.n,art:l.art,steps:0,solved:false,pieces:shuffle([...Array(l.n*l.n)].map((_,i)=>i)),placed:{},reference:true,history:[]};$('#puzzle-kicker').textContent=l.kicker;$('#arena-name').textContent=`${current().label} · ${l.name}`;$('#mode-copy').textContent=type==='jigsaw'?'Virtual mouse / vision':'Structured logic';$('#game-caption').textContent=type==='sokoban'?'Arrow keys move the keeper. Every crate must land on a target.':type==='maze'?'Arrow keys navigate to the green exit.':type==='klotski'?'Click a numbered tile, then use arrows. Example: 1R.':'Select a tile, then a destination. Click a placed tile to remove it.';$('#undo-piece-button').hidden=type!=='jigsaw';$('#step-count').textContent='00';$('#push-count').textContent='00';$('#metric-two').textContent=type==='maze'?'cells explored':type==='jigsaw'?'pieces placed':type==='klotski'?'slides':'pushes';$('#run-status').textContent='READY';$('#command-value').textContent='—';renderBoard();renderCards()}
 function shuffle(a){return a.sort(()=>Math.random()-.5)}
 function renderBoard(){if(type==='sokoban'||type==='maze')renderGrid();if(type==='klotski')renderKlotski();if(type==='jigsaw')renderJigsaw()}
 function renderGrid(){const rows=state.base.length,cols=state.base[0].length,goals=new Set((type==='sokoban'?state.goals:[state.goal]).map(p=>pos(...p))),crates=new Set((state.crates||[]).map(p=>pos(...p)));$('#game-stage').innerHTML=`<div class="grid-board" style="--cols:${cols};--rows:${rows}">${state.base.map((r,y)=>r.map((c,x)=>{let k=pos(x,y),g=goals.has(k);return`<div class="grid-cell ${c==='#'?'wall':''} ${g?'goal':''}">${crates.has(k)?`<i class="crate ${g?'good':''}"></i>`:''}${k===pos(...state.player)?`<i class="${type==='maze'?'maze-player':'player'}"></i>`:''}${type==='maze'&&g?'<i class="maze-goal"></i>':''}</div>`}).join('')).join('')}</div>`}
@@ -83,18 +87,21 @@ function renderDrawerContent(kind){
   kind=kind||($('#drawer-kicker').textContent.includes('WORKSPACE')?'workspace':$('#drawer-kicker').textContent.includes('CONFIG')?'api':$('#drawer-kicker').textContent.includes('HISTORY')?'trace':$('#drawer-kicker').textContent.includes('LIBRARY')?'puzzles':'agents');
   if(kind==='agents'){
     $('#model-select').value=modelChoice;
-    $('#model-select').onchange=e=>modelChoice=e.target.value;
+    $('#model-id').value=modelId;
+    $('#model-select').onchange=e=>{const previous=modelChoice;modelChoice=e.target.value;if(modelId===modelDefaults[previous])modelId=modelDefaults[modelChoice];renderDrawerContent('agents')};
+    $('#model-id').onchange=e=>modelId=e.target.value.trim()||modelDefaults[modelChoice];
     $('#run-from-drawer').onclick=run;
+    $('#toggle-reference').hidden=type!=='jigsaw';
     $('#toggle-reference').onclick=()=>{if(type!=='jigsaw'){toast('Reference mode is available in Jigsaw.');return}state.reference=!state.reference;renderBoard();log('VISION MODE',state.reference?'Reference image provided to the agent.':'Reference image withheld from the agent.');};
-    $('#spawn-agent').onclick=()=>{spawn();renderDrawerContent('agents')};
-    $('#agent-list').innerHTML=workspaces.map(w=>`<div class="agent-item"><div><b>${w.name}</b><small>${w.parent}</small></div><small>${w.status}</small></div>`).join('');
-    $('#trace-list').innerHTML=trace.slice(0,5).map(t=>`<div class="trace-item ${t.kind}"><b>${t.label}</b><small>${briefTrace(t.text)}</small></div>`).join('');
+    const explorers=workspaces.filter(w=>w.id!=='main');
+    $('#agent-list').innerHTML=explorers.length?workspaces.map(w=>`<div class="agent-item"><div><b>${w.name}</b><small>${w.parent}</small></div><small>${w.status}</small></div>`).join(''):`<div class="trace-item empty-run"><b>Main agent is ready.</b><small>It will create a private explorer only when that helps the current puzzle.</small></div>`;
+    $('#trace-list').innerHTML=trace.length?trace.filter(t=>t.kind!=='action').slice(-5).map(t=>`<div class="trace-item ${t.kind}"><b>${t.label}</b><small>${briefTrace(t.text)}</small></div>`).join('')||`<div class="trace-item"><b>EXECUTION</b><small>${state.steps} verified moves are visible on the board.</small></div>`:`<div class="trace-item empty-run"><b>No run yet.</b><small>Choose a provider and model, then the main agent will begin from this board.</small></div>`;
   }
   if(kind==='workspace'){
     $('#workspace-list').innerHTML=workspaces.map(w=>`<button class="workspace-item ${w.id===activeWorkspace?'active':''}" data-w="${w.id}"><span><b>${w.name}</b><small>${w.parent}</small></span><span>${w.status}</span></button>`).join('');
     $$('[data-w]').forEach(b=>b.onclick=()=>{activeWorkspace=b.dataset.w;$('#active-workspace').textContent=workspaces.find(w=>w.id===activeWorkspace).name;renderDrawerContent('workspace')});
   }
-  if(kind==='trace')$('#full-trace').innerHTML=trace.map(t=>`<div class="trace-item ${t.kind}"><b>${t.label}</b><small>${briefTrace(t.text,420)}</small></div>`).join('');
+  if(kind==='trace')$('#full-trace').innerHTML=trace.length?trace.map(t=>`<div class="trace-item ${t.kind}"><b>${t.label}</b><small>${briefTrace(t.text,420)}</small></div>`).join(''):`<div class="trace-item empty-run"><b>No run yet.</b><small>The public timeline will appear once an agent starts working.</small></div>`;
   if(kind==='puzzles'){
     pickerType=pickerType in puzzles?pickerType:type;
     const renderPicker=()=>{const family=puzzles[pickerType],selected=family.levels.find(l=>l.id===$('#drawer-level-select').value)||family.levels[0];$('#puzzle-family-tabs').innerHTML=Object.entries(puzzles).map(([id,p])=>`<button class="puzzle-family-tab ${id===pickerType?'active':''}" data-family="${id}">${p.label} <small>${p.levels.length}</small></button>`).join('');$('#drawer-level-select').innerHTML=family.levels.map((l,index)=>`<option value="${l.id}" ${l.id===(pickerType===type?levelId:family.levels[0].id)?'selected':''}>${String(index+1).padStart(2,'0')} · ${l.name}</option>`).join('');const updateCard=()=>{const l=family.levels.find(x=>x.id===$('#drawer-level-select').value);$('#selected-level-card').innerHTML=`<b>${family.label} · ${l.name}</b><small>${l.kicker} · ${family.description}</small>`};updateCard();$$('[data-family]').forEach(b=>b.onclick=()=>{pickerType=b.dataset.family;renderPicker()});$('#drawer-level-select').onchange=updateCard;$('#load-selected-level').onclick=()=>{type=pickerType;levelId=$('#drawer-level-select').value;closeDrawer();init()}};
@@ -123,42 +130,65 @@ async function playLiveActions(actions,source='Agent',generation=runGeneration){
     await new Promise(resolve=>setTimeout(resolve,280));
   }
   isRunning=false;
-  if(generation===runGeneration&&!state.solved)finishLiveRun(`${source} finished its action sequence.`,`${actions.length} validated steps were applied.`);
+  if(generation===runGeneration&&!state.solved){$('#run-status').textContent='ERROR';failLiveRun(`${source} stopped before the board was solved.`,`${actions.length} validated steps were applied; no success was claimed.`)}
+}
+function failLiveRun(title,detail){if(!liveRun.startedAt)return;updateLiveRun(title,detail,'Run needs attention');clearInterval(liveRun.timer);liveRun.timer=null}
+function publicTrace(entry){
+  if(!entry||entry.label==='ACTION')return;
+  const label=entry.label==='AGENT NOTE'?'AGENT NOTE':entry.label;
+  log(label,entry.text,entry.label==='EXPLORER'||entry.label==='WORKSPACE'?'report':'');
+  updateLiveRun('Claude is working in short batches.',briefTrace(entry.text,112),label.replace('_',' '));
+}
+async function streamSokobanRun(generation){
+  const response=await fetch('/api/agent/sokoban/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({map:level().map,model:modelId,task:'Solve this puzzle as a team. Inspect the board, decide whether an explorer is useful, optionally write a concise private helper artifact, and make deliberate batches of one to five verified moves. Show short public status reports, never hidden reasoning.'})});
+  if(!response.ok||!response.body){let message='The local server could not start a streamed agent run.';try{message=(await response.json()).error||message}catch{}throw new Error(message)}
+  const decoder=new TextDecoder(),reader=response.body.getReader();let buffer='',pending=Promise.resolve(),result;
+  const enqueueAction=(event)=>{pending=pending.then(async()=>{if(generation!==runGeneration||state.solved)return;const message=`Verified move ${String(event.index).padStart(2,'0')} · ${({up:'↑ Up',down:'↓ Down',left:'← Left',right:'→ Right'})[event.direction]}`;log('EXECUTION',message,'action');$('#run-status').textContent='RUNNING';const moved=move(event.direction,true);if(!moved)throw new Error(`The streamed route proposed an illegal ${event.direction} move.`);updateLiveRun('Claude is applying the next verified batch.',message,`Step ${event.index}`);await new Promise(resolve=>setTimeout(resolve,300))})}
+  const handle=(event)=>{
+    if(event.type==='started'){log('RUN START',`Connected to ${event.model}. The main agent will stream short action batches.`,'report');updateLiveRun('Claude main agent is surveying the board.',`Connected to ${event.model}; the first deliberate batch is being prepared.`,'Model connected')}
+    if(event.type==='trace')publicTrace(event.entry);
+    if(event.type==='usage')setUsage(event.usage);
+    if(event.type==='explorer'){const existing=workspaces.find(w=>w.name===event.explorer.name);if(!existing){const w=spawn(true);w.name=event.explorer.name;w.status='reported';w.parent='Frozen board snapshot';if($('#drawer').classList.contains('show')&&$('#drawer-kicker').textContent==='AGENT CONTROL')renderDrawerContent('agents')}}
+    if(event.type==='action')enqueueAction(event);
+    if(event.type==='complete')result=event.result;
+  };
+  while(true){const {done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});let lines=buffer.split('\n');buffer=lines.pop();for(const line of lines){if(!line.trim())continue;try{handle(JSON.parse(line))}catch{throw new Error('The streamed agent response was malformed.')}}}
+  if(buffer.trim())handle(JSON.parse(buffer));
+  await pending;
+  if(generation!==runGeneration)return;
+  if(result?.usage)setUsage(result.usage);
+  if(!result?.ok||!result?.solved)throw new Error(result?.error||'The agent stopped before it produced a solved board.');
+  if(!state.solved)throw new Error('The streamed run ended before the visible board reached a solved state.');
+  log('RUN COMPLETE',`${modelId} solved ${level().name} with ${result.actions.length} verified moves.${result.explorers?.length?` ${result.explorers.length} explorer report${result.explorers.length===1?' was':'s were'} used.`:' The main agent chose to work alone.'}`,'report');
 }
 run = async function(){
   const generation=runGeneration;
   let nudge;
+  if($('#model-id'))modelId=$('#model-id').value.trim()||modelDefaults[modelChoice];
   if(modelChoice==='local')return localRun();
   if(modelChoice==='openai'){
     beginLiveRun('Checking the local OpenAI configuration.','The browser never sees the key; this asks only the local server.');
-    try{const response=await fetch('/api/test-provider',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider:'openai'})});const result=await response.json();if(!result.ok)throw new Error(result.error||'OpenAI rejected the configured key.');finishLiveRun('OpenAI key accepted.','The OpenAI puzzle harness is the next provider adapter to connect.');toast('OpenAI key accepted; the puzzle runner is not connected yet.')}catch(error){finishLiveRun('OpenAI configuration needs attention.','The key was rejected before any puzzle request was made.');toast(error.message)}return;
+    try{const response=await fetch('/api/test-provider',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({provider:'openai',model:modelId})});const result=await response.json();if(!result.ok)throw new Error(result.error||'OpenAI rejected the configured key.');finishLiveRun('OpenAI key accepted.',`${result.model||modelId} is configured. The OpenAI puzzle-execution adapter is not implemented yet.`);toast('OpenAI key accepted; this build only runs Claude live agents.')}catch(error){failLiveRun('OpenAI configuration needs attention.','The key was rejected before any puzzle request was made.');toast(error.message)}return;
   }
   if(modelChoice!=='claude'){toast('Choose Local Solver, Claude, or configure an adapter.');return;}
   try{
     isRunning=true; $('#run-status').textContent='THINKING';beginLiveRun(type==='jigsaw'?'Claude is reviewing the visual reference.':'Claude main agent is surveying the board.',type==='jigsaw'?'Cataloguing visible regions before any virtual placement.':'Opening a private workspace and checking the puzzle state.');
-    nudge=setTimeout(()=>updateLiveRun(type==='jigsaw'?'Claude is matching visual regions.':'Claude is comparing safe paths.',type==='jigsaw'?'Comparing the reference with the controlled tile map.':'The main agent may ask an explorer and deterministic planner for confirmation.',type==='jigsaw'?'Visual region check':'Explorer / planner check'),1400);
+    nudge=setTimeout(()=>updateLiveRun(type==='jigsaw'?'Claude is matching visual regions.':'Claude is preparing its first short action batch.',type==='jigsaw'?'Comparing the reference with the controlled tile map.':'It may inspect, delegate, or write a private helper before moving.',type==='jigsaw'?'Visual region check':'First batch pending'),1400);
     if(type==='sokoban'){
-      const response=await fetch('/api/agent/sokoban',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({map:level().map,task:'Solve this puzzle as a team. Inspect the board, use an explorer when useful, write a concise private helper artifact, ask the sandbox solver to verify a route, then execute only verified moves. Give short public status reports, never hidden reasoning.'})});
-      clearTimeout(nudge);
-      const result=await response.json(); if(generation!==runGeneration)return;if(!result.ok)throw new Error(result.error||'Agent run failed');
-      const usedExplorer=result.explorers?.length||0;
-      if(usedExplorer)result.explorers.forEach(x=>{const w=spawn(true);w.name=x.name;w.status='reported';w.parent='Frozen board snapshot';log('EXPLORER REPORT',`${x.name} checked board risks and returned a concise strategy report.`,'report')});
-      if(result.traces?.some(t=>t.label==='WORKSPACE'))log('WORKSPACE NOTE','The main agent saved a private helper artifact for this run.','report');
-      log('PLAN VERIFIED',`Sandbox planner verified ${result.actions.length} legal moves${usedExplorer?` after ${usedExplorer} explorer report${usedExplorer===1?'':'s'}`:''}.`,'report');
-      updateLiveRun('Claude has a verified route.','Every move was checked against the canonical board before animation.',`${result.actions.length} safe moves queued`);
-      await playLiveActions(result.actions,'Claude',generation); return;
+      await streamSokobanRun(generation); clearTimeout(nudge); return;
     }
     if(type==='jigsaw'){
-      const response=await fetch('/api/agent/jigsaw',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pieces:state.n*state.n,reference:state.reference})});
+      const response=await fetch('/api/agent/jigsaw',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pieces:state.n*state.n,reference:state.reference,model:modelId})});
       clearTimeout(nudge);
       const result=await response.json(); if(generation!==runGeneration)return;if(!result.ok)throw new Error(result.error||'Visual agent run failed');
+      setUsage(result.usage);
       log('VISION REPORT',state.reference?'Claude catalogued visible regions of the supplied reference image.':'Reference withheld; Claude created a cautious exploration plan without guessing.','report');
       if(!result.actions.length){isRunning=false;$('#run-status').textContent='READY';finishLiveRun('Visual exploration paused.','No tile was placed because no visual board observation was supplied.');toast('No placement was guessed without a reference.');return;}
       updateLiveRun('Claude mapped the jigsaw reference.','Animating the virtual tile placements.',`${result.actions.length} tile placements queued`);
       await playLiveActions(result.actions,'Claude',generation); return;
     }
     clearTimeout(nudge);isRunning=false;toast('Live Claude runner is currently available for Sokoban and Jigsaw.'); $('#run-status').textContent='READY';finishLiveRun('This environment is not connected yet.','Choose Sokoban or Jigsaw for a live model run.');
-  }catch(error){if(generation!==runGeneration)return;clearTimeout(nudge);isRunning=false;$('#run-status').textContent='ERROR';finishLiveRun('The live run could not start.',error.message);toast(error.message);log('RUN ERROR',error.message,'report');}
+  }catch(error){if(generation!==runGeneration)return;clearTimeout(nudge);isRunning=false;$('#run-status').textContent='ERROR';failLiveRun('The live run needs attention.',error.message);toast(error.message);log('RUN ERROR',error.message,'report');}
 };
 $('#run-button').onclick=run;
 $('#undo-piece-button').onclick=undoJigsaw;

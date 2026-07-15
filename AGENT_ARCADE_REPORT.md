@@ -428,7 +428,9 @@ Browser (Next.js / React + TypeScript)
 
 ### Agent orchestration foundation
 
-The implementation will use the **OpenAI Agents SDK for TypeScript** as the foundation for model execution: agent loops, typed function tools, streaming lifecycle events, and development tracing. It is well suited to the project because it supports tool use and multi-agent composition. [OpenAI Agents SDK](https://openai.github.io/openai-agents-js/) documents these primitives, including agents-as-tools/handoffs and tracing.
+The target OpenAI integration will use the **OpenAI Agents SDK for TypeScript** for agent loops, typed function tools, streaming lifecycle events, and development tracing. It is well suited to the project because it supports tool use and multi-agent composition. [OpenAI Agents SDK](https://openai.github.io/openai-agents-js/) documents these primitives, including agents-as-tools/handoffs and tracing.
+
+**Current runnable prototype note:** the shipped Claude adapter is deliberately a small custom Node tool loop against the Anthropic Messages API, not the OpenAI Agents SDK. It streams public event records and action batches to the browser, supports the constrained puzzle tools, and keeps secrets in the local server. The UI exposes the exact provider/model ID and is honest that the OpenAI adapter currently verifies a key but does not yet execute puzzles. The SDK remains the intended foundation when that OpenAI puzzle runner is added.
 
 Agent Arcade will add a custom orchestration layer on top of the SDK. This is necessary because its core interaction is more specific than a standard handoff: the main agent remains the authoritative puzzle owner while independently scheduled children receive cloned environments, continue in the background, and return reports later. The custom layer owns:
 
@@ -439,7 +441,7 @@ Agent Arcade will add a custom orchestration layer on top of the SDK. This is ne
 - Virtual cursor animation and replay.
 - The `spawn_agent`, `check_agent`, `message_agent`, and `stop_agent` tools exposed to the main agent.
 
-In other words: **we will not reimplement model tool-calling and agent loops from scratch, but we will build the Agent Arcade-specific workspace runtime ourselves.**
+In other words, the intended OpenAI adapter will not reimplement model tool-calling and agent loops from scratch, while Agent Arcade will build its workspace runtime itself. The present Claude prototype is a deliberately narrow custom loop until the provider-neutral SDK adapter exists.
 
 ### Model-provider independence
 

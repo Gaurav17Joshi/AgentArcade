@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Agent Arcade — Implementation Report</title>
+  <style>
+    body{max-width:900px;margin:0 auto;padding:48px 24px 80px;background:#0c1020;color:#e8edff;font:16px/1.65 system-ui,sans-serif}h1,h2{line-height:1.15;color:#fff}h1{font-size:42px;margin-bottom:8px}h2{margin-top:42px}p,li{color:#c4cee6}code{background:#1c2742;border:1px solid #304263;border-radius:4px;padding:2px 5px}pre{overflow:auto;background:#121a30;padding:18px;border-radius:9px;border:1px solid #2b3b5c}a{color:#80e9e4}.tag{font-size:12px;letter-spacing:1px;color:#88a0d0}.ok{color:#9bf59d}table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid #2c395a;padding:10px;text-align:left}th{color:#91a3ca}
+  </style>
+</head>
+<body>
+  <p class="tag">AGENT ARCADE · IMPLEMENTATION REPORT</p>
+  <h1>Working arcade foundation</h1>
+  <p>This report describes the runnable first build in this repository. Open <a href="index.html">index.html</a> to use it.</p>
+  <h2>What was built</h2>
+  <ul>
+    <li>A polished responsive Agent Arcade workspace: workspace sidebar, live agent control center, action timeline, public trace, child-agent reports, and completion state.</li>
+    <li>Three playable Sokoban levels with keyboard and on-screen controls, crate pushes, goal detection, reset, metrics, and a local breadth-first-search agent.</li>
+    <li>Two playable Klotski boards inspired by the provided reference images. Each block is constrained to its long axis: horizontal blocks slide left/right only; vertical blocks slide up/down only. The violet block is the target and exits through the right-side opening.</li>
+    <li>An isolated-agent UI model: a main workspace can spawn explorers; in delegation mode, child agents report route findings without modifying the authoritative board.</li>
+  </ul>
+  <h2>How the Sokoban agent works</h2>
+  <p>The local demo agent receives the canonical grid state, runs breadth-first search over legal player moves and crate pushes, then visibly applies its found route one action at a time. This makes the browser demo deterministic, free to run, and testable without an API key.</p>
+  <pre>observe board → find shortest legal state path → animate actions
+→ record timeline/trace → check all goals → complete</pre>
+  <p>When “Delegate alternatives” is selected, the app also creates two child-workspace reports: one rejects a risky direction and one returns the verified route. These agents are intentionally display-level simulations for the frontend build; the production runtime described in <a href="AGENT_ARCADE_REPORT.md">AGENT_ARCADE_REPORT.md</a> replaces them with independently scheduled model calls and snapshots.</p>
+  <h2>Visual and interaction design</h2>
+  <p>The Sokoban board uses visual crate, goal, wall, and player affordances inspired by <code>Images/Sokoban1.png</code>, without copying its image content. The Klotski board uses a wood, grid, highlighted target, and exit treatment inspired by <code>Images/Klotski1.jpeg</code> and <code>Images/Klotski2.jpeg</code>.</p>
+  <h2>Run it locally</h2>
+  <pre>cd /Users/gauravjoshi/Desktop/R/AgentArcade
+python3 -m http.server 4173
+# open http://127.0.0.1:4173</pre>
+  <p>No package installation is needed. This deliberately makes the first build easy to share as a URL after static hosting deployment.</p>
+  <h2>Known next runtime layer</h2>
+  <table><tr><th>Included now</th><th>Next integration</th></tr><tr><td class="ok">Playable puzzle engines and local solver</td><td>Server-side OpenAI Agents SDK runtime with BYOK requests</td></tr><tr><td class="ok">Workspace tree and child reports</td><td>Real concurrent subagents, snapshots, messaging, and budgets</td></tr><tr><td class="ok">Long-axis visual puzzle UI</td><td>Screenshot/virtual-mouse harness and jigsaw environment</td></tr><tr><td class="ok">Local run trace and replayable state model</td><td>Persisted run history and provider comparison</td></tr></table>
+  <h2>Verification performed</h2>
+  <ul><li>Static JavaScript syntax and layout checks.</li><li>Browser run-through: load page, keyboard/control movement, Sokoban agent execution, reset, workspace controls, Klotski constraint behavior, completion overlay, and responsive display.</li></ul>
+</body>
+</html>

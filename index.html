@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b1020" />
+    <title>Agent Arcade — Visual workspaces for AI agents</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Agent workspaces">
+        <a class="brand" href="#top" aria-label="Agent Arcade home"><span class="brand-mark">✦</span><span>Agent<br /><strong>Arcade</strong></span></a>
+        <div class="sidebar-section-label">WORKSPACES</div>
+        <nav id="workspace-list" class="workspace-list" aria-label="Workspace switcher"></nav>
+        <button class="new-agent" id="spawn-agent-button" type="button"><span>＋</span> Spawn explorer</button>
+        <div class="sidebar-bottom"><div class="sandbox-card"><span class="sandbox-dot"></span><div><strong>Sandboxed</strong><small>Each agent has an isolated run</small></div></div><a href="AGENT_ARCADE_REPORT.md" class="doc-link">Read the design report ↗</a></div>
+      </aside>
+      <main class="main-content" id="top">
+        <header class="topbar"><div><p class="eyebrow">AGENT WORKSPACE</p><h1 id="workspace-title">Main Agent</h1></div><div class="top-actions"><button class="ghost-button" id="reset-button" type="button">Reset board</button><button class="stop-button" id="stop-button" type="button">Stop</button><button class="primary-button" id="run-button" type="button"><span class="play-icon">▶</span> Run agent</button></div></header>
+        <section class="workspace-meta" aria-label="Workspace controls"><div class="segmented" role="group" aria-label="Choose a puzzle"><button type="button" data-puzzle="sokoban" class="active">Sokoban</button><button type="button" data-puzzle="klotski">Klotski</button></div><div class="level-select-wrap"><label for="level-select">Challenge</label><select id="level-select" aria-label="Puzzle level"></select></div><div class="mode-pill"><span></span><span id="harness-label">STRUCTURED LOGIC HARNESS</span></div></section>
+        <section class="arena-layout">
+          <div class="puzzle-area">
+            <div class="puzzle-card"><div class="puzzle-card-head"><div><p id="puzzle-kicker" class="eyebrow">SOKOBAN · EASY ROUTE</p><h2 id="puzzle-title">Crate Course</h2></div><div class="stat-row"><div class="stat"><small>STEPS</small><strong id="step-count">0</strong></div><div class="stat"><small>PUSHES</small><strong id="push-count">0</strong></div><div class="stat"><small>STATUS</small><strong id="run-status" class="status-ready">READY</strong></div></div></div><div id="game-stage" class="game-stage sokoban-stage" tabindex="0" aria-label="Playable puzzle board"></div><div class="puzzle-card-foot"><p id="puzzle-help">Use arrow keys or the controls to move. Push every crate onto a glowing goal.</p><div id="manual-controls" class="manual-controls" aria-label="Puzzle controls"></div></div></div>
+            <section class="timeline-card" aria-label="Action timeline"><div class="section-heading"><div><p class="eyebrow">RUN TIMELINE</p><h2>What the agent did</h2></div><button id="clear-timeline" class="text-button" type="button">Clear</button></div><ol id="timeline" class="timeline"></ol></section>
+          </div>
+          <aside class="control-center" aria-label="Agent Control Center">
+            <div class="control-header"><div><p class="eyebrow">AGENT CONTROL CENTER</p><h2 id="control-agent-name">Main Agent</h2></div><span id="agent-state-badge" class="state-badge ready">Ready</span></div>
+            <div class="agent-profile"><div class="agent-avatar" id="agent-avatar">M</div><div><strong id="agent-role">Puzzle operator</strong><p id="agent-parent">Authoritative workspace</p></div></div>
+            <div class="field-group"><label for="model-select">Model</label><select id="model-select"><option value="local">Local Solver (demo)</option><option value="gpt">GPT via API (coming next)</option><option value="custom">Custom provider adapter (coming next)</option></select></div>
+            <div class="field-group"><label for="strategy-select">Approach</label><select id="strategy-select"><option value="careful">Careful search</option><option value="direct">Direct route</option><option value="explore">Delegate alternatives</option></select></div>
+            <div class="budget-grid"><div><small>AGENT BUDGET</small><strong>80 actions</strong></div><div><small>EST. COST</small><strong id="cost-value">$0.00</strong></div></div>
+            <div class="trace-section"><div class="section-heading compact"><div><p class="eyebrow">PUBLIC ACTIVITY TRACE</p></div><span class="live-indicator"><i></i> LIVE</span></div><div id="trace" class="trace" aria-live="polite"></div></div>
+            <div class="report-section"><div class="section-heading compact"><div><p class="eyebrow">CHILD AGENT REPORTS</p></div></div><div id="child-reports" class="child-reports"></div></div>
+          </aside>
+        </section>
+      </main>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="success-overlay" class="success-overlay" aria-hidden="true"><div class="success-card"><span>✦</span><p class="eyebrow">PUZZLE COMPLETE</p><h2>Beautifully solved.</h2><p id="success-copy"></p><button id="next-level-button" class="primary-button" type="button">Try another challenge</button></div></div>
+    <script src="app.js"></script>
+  </body>
+</html>

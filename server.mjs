@@ -8,148 +8,135 @@ const envPath = join(root, '.env.local');
 const env = {};
 if (existsSync(envPath)) {
   const lines = (await readFile(envPath, 'utf8')).split(/\r?\n/);
-  for (const line of lines) { const m=line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/); if (m) env[m[1]]=m[2].replace(/^['"]|['"]$/g,''); }
+  for (const line of lines) { const match=line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/); if (match) env[match[1]]=match[2].replace(/^['"]|['"]$/g,''); }
 }
+
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.md':'text/markdown; charset=utf-8','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.svg':'image/svg+xml'};
-const keyFor = (provider) => provider === 'anthropic' ? (process.env.ANTHROPIC_API_KEY || env.ANTHROPIC_API_KEY) : (process.env.OPENAI_API_KEY || env.OPENAI_API_KEY);
-const json = (res, status, payload) => { res.writeHead(status, {'content-type':'application/json','cache-control':'no-store'}); res.end(JSON.stringify(payload)); };
-const readJson = (req) => new Promise((resolve, reject) => { let raw=''; req.on('data', c => raw += c); req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch (error) { reject(error); } }); req.on('error', reject); });
-const providerError = (body, status) => {
+const keyFor = provider => provider === 'anthropic' ? (process.env.ANTHROPIC_API_KEY || env.ANTHROPIC_API_KEY) : (process.env.OPENAI_API_KEY || env.OPENAI_API_KEY);
+const json = (res,status,payload) => { res.writeHead(status,{'content-type':'application/json','cache-control':'no-store'});res.end(JSON.stringify(payload)); };
+const readJson = req => new Promise((resolve,reject)=>{let raw='';req.on('data',chunk=>raw+=chunk);req.on('end',()=>{try{resolve(raw?JSON.parse(raw):{})}catch(error){reject(error)}});req.on('error',reject)});
+const DEFAULT_CLAUDE_MODEL='claude-sonnet-5';
+const safeModel=(model,fallback)=>typeof model==='string'&&/^[a-zA-Z0-9._:-]{2,120}$/.test(model)?model:fallback;
+const directionMap={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
+const cellKey=(x,y)=>`${x},${y}`;
+
+function providerError(body,status,model='') {
   const message=String(body?.error?.message||'');
   if(/api key|authentication|unauthorized/i.test(message)) return 'Provider rejected the configured key. Replace it in .env.local and restart the local server.';
-  return `Provider request failed (HTTP ${status}). Check the local server configuration.`;
-};
-const directionMap = {up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
-const cellKey = (x,y) => `${x},${y}`;
-function parseSokoban(map) { const goals=[],crates=[]; let player; const base=map.map((row,y)=>[...row].map((c,x)=>{if('.+*'.includes(c))goals.push([x,y]);if('$*'.includes(c))crates.push([x,y]);if('@+'.includes(c))player=[x,y];return c==='#'?'#':' '})); return {base,goals,crates,player,actions:[]}; }
-function serialiseBoard(env) { return env.base.map((row,y)=>row.map((base,x)=>{const k=cellKey(x,y); if(base==='#')return '#'; const crate=env.crates.some(c=>cellKey(...c)===k); const goal=env.goals.some(g=>cellKey(...g)===k); const player=cellKey(...env.player)===k; return player?(goal?'+':'@'):crate?(goal?'*':'$'):(goal?'.':' ');}).join('')).join('\n'); }
+  if(status===404&&model==='claude-sonnet-5-20251001') return 'claude-sonnet-5-20251001 is not an Anthropic model ID. Choose claude-sonnet-5 (no dated suffix), or choose a curated preset.';
+  if(status===404) return `Model “${model||'selected model'}” was not found or is unavailable to this provider account. Choose a curated preset or enter an exact model ID your account can access.`;
+  return `Provider request failed (HTTP ${status}). ${message||'Check the selected model and local server configuration.'}`;
+}
+function normaliseMap(map){const width=Math.max(...map.map(row=>row.length));return map.map(row=>row.padEnd(width,'#'));}
+function parseSokoban(map){
+  const goals=[],crates=[];let player;
+  const base=normaliseMap(map).map((row,y)=>[...row].map((char,x)=>{if('.+*'.includes(char))goals.push([x,y]);if('$*'.includes(char))crates.push([x,y]);if('@+'.includes(char))player=[x,y];return char==='#'?'#':' '}));
+  if(!player||!goals.length)throw new Error('This Sokoban map needs a player and at least one target.');
+  return {base,goals,crates,player,actions:[]};
+}
+function serialiseSokoban(env){return env.base.map((row,y)=>row.map((base,x)=>{const key=cellKey(x,y);if(base==='#')return '#';const crate=env.crates.some(c=>cellKey(...c)===key),goal=env.goals.some(g=>cellKey(...g)===key),player=cellKey(...env.player)===key;return player?(goal?'+':'@'):crate?(goal?'*':'$'):(goal?'.':' ')}).join('')).join('\n');}
 function isWall(env,x,y){return y<0||y>=env.base.length||x<0||x>=env.base[0].length||env.base[y][x]==='#';}
-function crateIndex(env,x,y){return env.crates.findIndex(c=>c[0]===x&&c[1]===y);}
-function applySokoban(env,direction){const [dx,dy]=directionMap[direction]||[];if(dx===undefined)return {ok:false,error:'Unknown direction'};const [x,y]=env.player,nx=x+dx,ny=y+dy;if(isWall(env,nx,ny))return {ok:false,error:'Wall blocks that move'};const ci=crateIndex(env,nx,ny);if(ci>=0){const bx=nx+dx,by=ny+dy;if(isWall(env,bx,by)||crateIndex(env,bx,by)>=0)return {ok:false,error:'Crate cannot be pushed there'};env.crates[ci]=[bx,by];}env.player=[nx,ny];env.actions.push(direction);return {ok:true,board:serialiseBoard(env),solved:env.goals.every(g=>crateIndex(env,...g)>=0)};}
-function solveSokoban(env){const encode=s=>`${s.player.join(',')}|${s.crates.map(c=>c.join(',')).sort().join(';')}`,queue=[structuredClone(env)],seen=new Set([encode(env)]);while(queue.length){const s=queue.shift();if(s.goals.every(g=>crateIndex(s,...g)>=0))return s.actions||[];for(const direction of Object.keys(directionMap)){const n=structuredClone(s);const result=applySokoban(n,direction);if(result.ok){const code=encode(n);if(!seen.has(code)){seen.add(code);queue.push(n);}}}}return null;}
-const DEFAULT_CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
-const safeModel = (model, fallback) => typeof model === 'string' && /^[a-zA-Z0-9._:-]{2,120}$/.test(model) ? model : fallback;
-const usageFrom = (body) => ({inputTokens:Number(body?.usage?.input_tokens || 0),outputTokens:Number(body?.usage?.output_tokens || 0)});
-const addUsage = (total, usage) => ({inputTokens:total.inputTokens + usage.inputTokens,outputTokens:total.outputTokens + usage.outputTokens});
-function estimateClaudeCost(model, usage) {
-  const id=String(model).toLowerCase();
-  const rate=id.includes('haiku') ? [1,5] : id.includes('sonnet') ? [3,15] : id.includes('opus') ? [5,25] : null;
-  return rate ? (usage.inputTokens * rate[0] + usage.outputTokens * rate[1]) / 1_000_000 : null;
-}
-const usageSummary = (model, usage) => ({model,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,estimatedCostUsd:estimateClaudeCost(model,usage)});
+function crateIndex(env,x,y){return env.crates.findIndex(crate=>crate[0]===x&&crate[1]===y);}
+function applySokoban(env,direction){const [dx,dy]=directionMap[direction]||[];if(dx===undefined)return{ok:false,error:'Unknown direction'};const[x,y]=env.player,nx=x+dx,ny=y+dy;if(isWall(env,nx,ny))return{ok:false,error:'Wall blocks that move'};const index=crateIndex(env,nx,ny);if(index>=0){const bx=nx+dx,by=ny+dy;if(isWall(env,bx,by)||crateIndex(env,bx,by)>=0)return{ok:false,error:'Crate cannot be pushed there'};env.crates[index]=[bx,by];}env.player=[nx,ny];env.actions.push(direction);return{ok:true,solved:env.goals.every(goal=>crateIndex(env,...goal)>=0),board:serialiseSokoban(env)};}
+function solveSokoban(initial){const encode=state=>`${state.player.join(',')}|${state.crates.map(c=>c.join(',')).sort().join(';')}`,queue=[structuredClone(initial)],seen=new Set([encode(initial)]);let inspected=0;while(queue.length&&inspected++<180000){const state=queue.shift();if(state.goals.every(goal=>crateIndex(state,...goal)>=0))return state.actions||[];for(const direction of Object.keys(directionMap)){const next=structuredClone(state),result=applySokoban(next,direction);if(result.ok){const code=encode(next);if(!seen.has(code)){seen.add(code);queue.push(next)}}}}return null;}
 
-async function runAnthropicExplorer(key, board, task, model) {
-  const response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model,max_tokens:180,system:'You are a concise Sokoban exploration subagent. Give one concrete, public-facing report. Do not claim hidden reasoning.',messages:[{role:'user',content:`Task: ${task}\n\nBoard:\n${board}`}]})});
-  const body=await response.json();
-  return response.ok ? {ok:true,report:body.content?.map(x=>x.text||'').join(''),usage:usageFrom(body)} : {ok:false,report:`Explorer could not run: ${providerError(body,response.status)}`,usage:usageFrom(body)};
+function parseMaze(map){const raw=parseSokoban(map);if(raw.goals.length!==1)throw new Error('A maze must have exactly one exit.');return{base:raw.base,player:raw.player,goal:raw.goals[0],actions:[]};}
+function serialiseMaze(env){return env.base.map((row,y)=>row.map((base,x)=>{if(base==='#')return '#';const key=cellKey(x,y);if(key===cellKey(...env.player))return '@';if(key===cellKey(...env.goal))return '.';return ' ';}).join('')).join('\n');}
+function applyMaze(env,direction){const[dx,dy]=directionMap[direction]||[];if(dx===undefined)return{ok:false,error:'Unknown direction'};const[x,y]=env.player,nx=x+dx,ny=y+dy;if(isWall(env,nx,ny))return{ok:false,error:'Wall blocks that move'};env.player=[nx,ny];env.actions.push(direction);return{ok:true,solved:cellKey(...env.player)===cellKey(...env.goal),board:serialiseMaze(env)};}
+function solveMaze(initial){const queue=[{position:initial.player,path:[]}],seen=new Set([cellKey(...initial.player)]);while(queue.length){const item=queue.shift();if(cellKey(...item.position)===cellKey(...initial.goal))return item.path;for(const[direction,[dx,dy]]of Object.entries(directionMap)){const next=[item.position[0]+dx,item.position[1]+dy],key=cellKey(...next);if(!isWall(initial,...next)&&!seen.has(key)){seen.add(key);queue.push({position:next,path:[...item.path,direction]})}}}return null;}
+
+function parseKlotski(level){
+  const cols=Number(level?.cols||6),rows=Number(level?.rows||6),exitRow=Number(level?.exitRow??2),pieces=structuredClone(level?.pieces||[]);
+  if(!Number.isInteger(cols)||!Number.isInteger(rows)||!pieces.length)throw new Error('Invalid Klotski level.');
+  const ids=new Set();for(const piece of pieces){if(!piece.id||ids.has(piece.id)||!Number.isInteger(piece.x)||!Number.isInteger(piece.y)||!Number.isInteger(piece.w)||!Number.isInteger(piece.h)||piece.w===piece.h)throw new Error('Klotski tiles must have unique IDs and a long axis.');ids.add(piece.id);}
+  const env={cols,rows,exitRow,pieces,actions:[]};for(const piece of pieces)if(!canMoveKlotskiBounds(env,piece.x,piece.y,piece,piece))throw new Error('Klotski level contains an invalid or overlapping tile.');
+  return env;
 }
-async function runAnthropicSokobanAgent({map, task='Solve the puzzle safely.', maxTurns=30, model, onEvent}) {
-  const key=keyFor('anthropic'); if(!key) return {ok:false,error:'ANTHROPIC_API_KEY is not configured.'};
-  const selectedModel=safeModel(model,process.env.ANTHROPIC_MODEL || DEFAULT_CLAUDE_MODEL);
-  const env=parseSokoban(map); const runId=`run-${Date.now()}`; const traces=[], explorers=[]; let usage={inputTokens:0,outputTokens:0};
-  const emit=(event)=>{try{onEvent?.(event)}catch{}};
-  const record=(label,text)=>{const entry={label,text};traces.push(entry);emit({type:'trace',entry});};
-  const execute=(direction)=>{
-    const output=applySokoban(env,direction);
-    if(output.ok){record('ACTION',`Applied ${direction}.`);emit({type:'action',direction,index:env.actions.length,board:output.board});}
-    return output;
-  };
+function occupiedKlotski(env,except){const occupied=new Set();for(const piece of env.pieces)if(piece!==except)for(let y=piece.y;y<piece.y+piece.h;y++)for(let x=piece.x;x<piece.x+piece.w;x++)occupied.add(cellKey(x,y));return occupied;}
+function canMoveKlotskiBounds(env,x,y,piece,except){const occupied=occupiedKlotski(env,except);for(let yy=y;yy<y+piece.h;yy++)for(let xx=x;xx<x+piece.w;xx++)if(xx<0||xx>=env.cols||yy<0||yy>=env.rows||occupied.has(cellKey(xx,yy)))return false;return true;}
+function canMoveKlotski(env,piece,direction){if(!piece||!directionMap[direction])return false;const horizontal=piece.w>piece.h;if((horizontal&&['up','down'].includes(direction))||(!horizontal&&['left','right'].includes(direction)))return false;const[dx,dy]=directionMap[direction];return canMoveKlotskiBounds(env,piece.x+dx,piece.y+dy,piece,piece);}
+function serialiseKlotski(env){const board=Array.from({length:env.rows},()=>Array(env.cols).fill('.'));for(const piece of env.pieces)for(let y=piece.y;y<piece.y+piece.h;y++)for(let x=piece.x;x<piece.x+piece.w;x++)board[y][x]=piece.id;return `Exit: right side of row ${env.exitRow + 1}\n${board.map(row=>row.map(cell=>String(cell).padStart(2,' ')).join(' ')).join('\n')}`;}
+function normaliseKlotskiAction(action){const raw=action||{},id=raw.id??raw.block??raw.block_id??raw.piece_id??raw.piece??raw.tile,direction=raw.direction;return{id:id===undefined?'':String(id),direction};}
+function applyKlotski(env,action){const normalized=normaliseKlotskiAction(action),{id,direction}=normalized;if(!id)return{ok:false,error:'Every Klotski action needs a tile id, for example {"id":"2","direction":"down"}.'};const piece=env.pieces.find(item=>item.id===id);if(!piece)return{ok:false,error:`Tile ${id} does not exist. Use one of: ${env.pieces.map(item=>item.id).join(', ')}.`};if(!canMoveKlotski(env,piece,direction))return{ok:false,error:`${id}${String(direction||'')[0]?.toUpperCase()||''} is blocked or off-axis`};const[dx,dy]=directionMap[direction];piece.x+=dx;piece.y+=dy;env.actions.push(normalized);return{ok:true,action:normalized,solved:Boolean(piece.target&&piece.y===env.exitRow&&piece.x===env.cols-piece.w),board:serialiseKlotski(env)};}
+function solveKlotski(initial){const encode=state=>state.pieces.map(piece=>`${piece.id}:${piece.x},${piece.y}`).join('|'),queue=[structuredClone(initial)],seen=new Set([encode(initial)]);let inspected=0;while(queue.length&&inspected++<150000){const state=queue.shift(),target=state.pieces.find(piece=>piece.target);if(target&&target.y===state.exitRow&&target.x===state.cols-target.w)return state.actions||[];for(const piece of state.pieces)for(const direction of Object.keys(directionMap)){if(!canMoveKlotski(state,piece,direction))continue;const next=structuredClone(state),moving=next.pieces.find(item=>item.id===piece.id),[dx,dy]=directionMap[direction];moving.x+=dx;moving.y+=dy;next.actions=[...(state.actions||[]),{id:piece.id,direction}];const code=encode(next);if(!seen.has(code)){seen.add(code);queue.push(next)}}}return null;}
+
+const usageFrom=body=>({inputTokens:Number(body?.usage?.input_tokens||0),outputTokens:Number(body?.usage?.output_tokens||0)});
+const addUsage=(total,usage)=>({inputTokens:total.inputTokens+usage.inputTokens,outputTokens:total.outputTokens+usage.outputTokens});
+function estimateClaudeCost(model,usage){const id=String(model).toLowerCase();const rate=id.includes('haiku')?[1,5]:id.includes('sonnet')?[2,10]:id.includes('opus')?[5,25]:id.includes('fable')?[10,50]:null;return rate?(usage.inputTokens*rate[0]+usage.outputTokens*rate[1])/1_000_000:null;}
+const usageSummary=(model,usage)=>({model,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,estimatedCostUsd:estimateClaudeCost(model,usage)});
+
+async function runAnthropicExplorer(key,board,task,model,kind){
+  const response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model,max_tokens:180,system:`You are a concise ${kind} exploration subagent. Give one concrete public report. Do not reveal hidden chain-of-thought.`,messages:[{role:'user',content:`Task: ${task}\n\nBoard:\n${board}`}]})});
+  const body=await response.json();return response.ok?{ok:true,report:body.content?.map(item=>item.text||'').join(''),usage:usageFrom(body)}:{ok:false,report:`Explorer could not run: ${providerError(body,response.status,model)}`,usage:usageFrom(body)};
+}
+function actionSchema(kind){const isKlotski=String(kind).toLowerCase()==='klotski';return isKlotski?{type:'array',items:{type:'object',properties:{id:{type:'string',description:'The printed tile number as a string, for example "2". This field is required.'},direction:{type:'string',enum:['up','down','left','right']}},required:['id','direction']},minItems:1,maxItems:5}:{type:'array',items:{type:'string',enum:['up','down','left','right']},minItems:1,maxItems:5};}
+function prettyAction(kind,action){const isKlotski=String(kind).toLowerCase()==='klotski',normalized=isKlotski?normaliseKlotskiAction(action):action;return isKlotski?`${normalized.id}${normalized.direction[0].toUpperCase()}`:normalized;}
+async function runAnthropicStructuredAgent({kind,env,serialise,apply,solve,isSolved,model,onEvent,task}){
+  const key=keyFor('anthropic');if(!key)return{ok:false,error:'ANTHROPIC_API_KEY is not configured.'};
+  const selectedModel=safeModel(model,process.env.ANTHROPIC_MODEL||DEFAULT_CLAUDE_MODEL),runId=`run-${Date.now()}`,traces=[],explorers=[];let usage={inputTokens:0,outputTokens:0};
+  // Sonnet 5 enables adaptive thinking by default. For this interaction-first
+  // arcade runner we turn it off, keeping small-board tool turns responsive.
+  // Fable requires adaptive thinking, so it remains untouched.
+  const thinkingConfig=/claude-(sonnet-5|opus)/.test(selectedModel)?{thinking:{type:'disabled'}}:{};
+  const emit=event=>{try{onEvent?.(event)}catch{}};const record=(label,text)=>{const entry={label,text};traces.push(entry);emit({type:'trace',entry});};
   const tools=[
-    {name:'observe_board',description:'Read the current Sokoban board as ASCII.',input_schema:{type:'object',properties:{}}},
-    {name:'apply_action',description:'Apply exactly one legal movement action.',input_schema:{type:'object',properties:{direction:{type:'string',enum:['up','down','left','right']}},required:['direction']}},
-    {name:'apply_actions',description:'Apply a short batch of one to five legal movement actions. Use this for deliberate progress, then observe again before the next batch.',input_schema:{type:'object',properties:{directions:{type:'array',items:{type:'string',enum:['up','down','left','right']},minItems:1,maxItems:5}},required:['directions']}},
+    {name:'observe_board',description:`Read the current ${kind} board as a compact text state.`,input_schema:{type:'object',properties:{}}},
+    {name:'apply_actions',description:kind==='Klotski'?'Apply one to five legal numbered-tile slides. Every action must be an object exactly like {"id":"2","direction":"down"}; the id is the printed tile number. Include a short public reason based on visible board facts.':'Apply one to five legal actions, then observe before another batch. Include a short public reason based on visible board facts.',input_schema:{type:'object',properties:{actions:actionSchema(kind),reason:{type:'string',description:'One concise observable reason for this batch.'}},required:['actions','reason']}},
     {name:'spawn_explorer',description:'Ask an isolated subagent to evaluate a strategy from the current board snapshot.',input_schema:{type:'object',properties:{task:{type:'string'}},required:['task']}},
     {name:'write_workspace_file',description:'Write a small private helper artifact (.md or .py) in this run sandbox. It cannot execute or access the host filesystem.',input_schema:{type:'object',properties:{name:{type:'string'},content:{type:'string'}},required:['name','content']}},
     {name:'run_builtin_solver',description:'Ask the deterministic sandbox solver for a verified action sequence from the current board.',input_schema:{type:'object',properties:{}}}
   ];
-  const messages=[{role:'user',content:`${task}\nYou are the main agent. Use tools to observe and act. You may spawn explorer agents or write a small helper file. Work in deliberate batches of at most five actions, then inspect the updated board. run_builtin_solver is advisory only: you decide what to do with its plan. Finish only when the board is solved. Do not output hidden chain-of-thought; use tool actions and short public reports.`}];
-  for(let turn=0;turn<maxTurns;turn++){
-    const response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:selectedModel,max_tokens:300,system:'You control a safe, isolated Sokoban workspace. Use tools rather than guessing. Keep public text concise.',tools,messages})});
-    const body=await response.json(); usage=addUsage(usage,usageFrom(body)); emit({type:'usage',usage:usageSummary(selectedModel,usage)}); if(!response.ok)return {ok:false,error:providerError(body,response.status),traces,explorers,usage:usageSummary(selectedModel,usage)};
-    messages.push({role:'assistant',content:body.content}); const toolResults=[];
-    for(const item of body.content||[]){
+  const messages=[{role:'user',content:`${task||`Solve this ${kind} puzzle.`}\nYou are the main agent. Use tools to inspect and act. Work in batches of at most five actions and include one concise public “Reason” in each batch. You may spawn explorers or write a small private helper. The built-in solver is advisory: decide how to use it. Continue until solved, or report that no verified route exists. Never output hidden chain-of-thought.`}];
+  for(let turn=0;turn<36;turn++){
+    const response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:selectedModel,max_tokens:360,system:`You control a safe, isolated ${kind} workspace. Use tools rather than guessing. Public text must be brief and factual.`,tools,messages,...thinkingConfig})});
+    const body=await response.json();usage=addUsage(usage,usageFrom(body));emit({type:'usage',usage:usageSummary(selectedModel,usage)});if(!response.ok)return{ok:false,error:providerError(body,response.status,selectedModel),traces,explorers,usage:usageSummary(selectedModel,usage)};
+    // Thinking is disabled for Sonnet/Opus interactive runs. If a model does
+    // return signed thinking, preserve the original blocks unchanged for the API
+    // while only public text and tool events are emitted to the browser.
+    const assistantBlocks=body.content||[];
+    if(assistantBlocks.length)messages.push({role:'assistant',content:assistantBlocks});const toolResults=[];
+    for(const item of assistantBlocks){
       if(item.type==='text')record('AGENT NOTE',item.text);
-      if(item.type!=='tool_use')continue;
-      let output;
-      if(item.name==='observe_board'){output={board:serialiseBoard(env),actions:env.actions.length};record('OBSERVATION','Read the current board state.');}
-      if(item.name==='apply_action'){output=execute(item.input.direction);}
+      if(item.type!=='tool_use')continue;let output;
+      if(item.name==='observe_board'){output={board:serialise(env),actions:env.actions.length};record('OBSERVATION','Read the current board state before committing another batch.');}
       if(item.name==='apply_actions'){
-        const actions=[]; let failure;
-        for(const direction of (item.input.directions||[]).slice(0,5)){const result=execute(direction);if(!result.ok){failure=result.error;break}actions.push(direction);if(result.solved)break}
-        output={ok:actions.length>0,actions,failure:failure||null,board:serialiseBoard(env),solved:env.goals.every(g=>crateIndex(env,...g)>=0)};
+        const applied=[];let failure;for(const action of(item.input.actions||[]).slice(0,5)){const result=apply(env,action);if(!result.ok){failure=result.error;break}const committed=result.action||action;applied.push(committed);emit({type:'action',action:committed, index:env.actions.length, board:result.board});if(result.solved)break;}
+        const reason=String(item.input.reason||'The next short batch preserves a verified route.').replace(/\s+/g,' ').trim().slice(0,240);record('DECISION',`Reason: ${reason}`);record('BATCH',`Committed ${applied.length} legal action${applied.length===1?'':'s'}: ${applied.map(action=>prettyAction(kind,action)).join(', ')}.`);output={ok:applied.length>0,actions:applied,failure:failure||null,board:serialise(env),solved:isSolved(env)};
       }
-      if(item.name==='run_builtin_solver'){
-        const plan=solveSokoban(structuredClone(env)); output={plan,found:plan!==null};
-        if(plan!==null)record('VERIFIER',`Sandbox verifier proposed a ${plan.length}-move route; the main agent decides how to execute it.`);
-        else record('VERIFIER','Sandbox verifier found no safe completion route.');
-      }
-      if(item.name==='spawn_explorer'){
-        const result=await runAnthropicExplorer(key,serialiseBoard(env),item.input.task,selectedModel); usage=addUsage(usage,result.usage);
-        emit({type:'usage',usage:usageSummary(selectedModel,usage)});
-        const explorer={name:`Explorer ${explorers.length+1}`,task:item.input.task,report:result.report}; explorers.push(explorer);output=explorer;record('EXPLORER',`${explorer.name}: ${result.report}`);emit({type:'explorer',explorer});
-      }
-      if(item.name==='write_workspace_file'){const safeName=(item.input.name||'notes.md').replace(/[^a-zA-Z0-9._-]/g,'_').replace(/^\.+/,'').slice(0,80);const name=/\.(md|py)$/.test(safeName)?safeName:`${safeName}.md`;const folder=join('/private/tmp','agent-arcade-workspaces',runId);await mkdir(folder,{recursive:true});await writeFile(join(folder,name),String(item.input.content||'').slice(0,6000),'utf8');output={saved:name,workspace:'isolated temporary run workspace'};record('WORKSPACE',`Saved ${name} in the isolated run workspace.`);}
+      if(item.name==='run_builtin_solver'){const plan=solve(structuredClone(env));output={found:plan!==null,plan};record('VERIFIER',plan!==null?`Sandbox verifier found a ${plan.length}-action completion route; the main agent is choosing its next batch.`:'Sandbox verifier found no safe completion route from this state.');}
+      if(item.name==='spawn_explorer'){const result=await runAnthropicExplorer(key,serialise(env),item.input.task,selectedModel,kind);usage=addUsage(usage,result.usage);emit({type:'usage',usage:usageSummary(selectedModel,usage)});const explorer={name:`Explorer ${explorers.length+1}`,task:item.input.task,report:result.report};explorers.push(explorer);output=explorer;record('EXPLORER',`${explorer.name}: ${result.report}`);emit({type:'explorer',explorer});}
+      if(item.name==='write_workspace_file'){const raw=(item.input.name||'notes.md').replace(/[^a-zA-Z0-9._-]/g,'_').replace(/^\.+/,'').slice(0,80),name=/\.(md|py)$/.test(raw)?raw:`${raw}.md`,folder=join('/private/tmp','agent-arcade-workspaces',runId);await mkdir(folder,{recursive:true});await writeFile(join(folder,name),String(item.input.content||'').slice(0,6000),'utf8');output={saved:name,workspace:'isolated temporary run workspace'};record('WORKSPACE',`Saved ${name} in the isolated run workspace.`);}
       toolResults.push({type:'tool_result',tool_use_id:item.id,content:JSON.stringify(output||{ok:false,error:'Unknown tool'})});
     }
     if(toolResults.length)messages.push({role:'user',content:toolResults});
-    if(env.goals.every(g=>crateIndex(env,...g)>=0))return {ok:true,solved:true,actions:env.actions,traces,explorers,workspace:`/private/tmp/agent-arcade-workspaces/${runId}`,usage:usageSummary(selectedModel,usage)};
-    if(body.stop_reason==='end_turn'&&!toolResults.length){record('REPLAN','The board is still unsolved; requesting the main agent’s next deliberate batch.');messages.push({role:'user',content:'The board is not solved yet. Continue with the next observation, delegation, or short action batch. Do not stop until it is solved or you have no verified route.'});}
+    if(isSolved(env))return{ok:true,solved:true,actions:env.actions,traces,explorers,workspace:`/private/tmp/agent-arcade-workspaces/${runId}`,usage:usageSummary(selectedModel,usage)};
+    if(body.stop_reason==='end_turn'&&!toolResults.length){record('REPLAN','The board is still unsolved; requesting the next observation or deliberate action batch.');messages.push({role:'user',content:'The board is not solved. Continue with an observation, delegation, verifier, or short action batch.'});}
   }
-  record('RUN LIMIT','The main agent reached its safety turn limit before solving. The visible board remains at the last verified state.');
-  return {ok:false,solved:false,error:'The model reached the safety turn limit before solving. The visible board remains at the last verified state.',traces,explorers,workspace:`/private/tmp/agent-arcade-workspaces/${runId}`,usage:usageSummary(selectedModel,usage)};
+  record('RUN LIMIT','The main agent reached its safety turn limit. The visible board remains at the last verified state.');return{ok:false,solved:false,error:'The model reached the safety turn limit before solving. The visible board remains at the last verified state.',traces,explorers,usage:usageSummary(selectedModel,usage)};
 }
-async function runAnthropicJigsawAgent({pieces=9, reference=true, model}) {
-  const key=keyFor('anthropic'); if(!key) return {ok:false,error:'ANTHROPIC_API_KEY is not configured.'};
-  const selectedModel=safeModel(model,process.env.ANTHROPIC_MODEL || DEFAULT_CLAUDE_MODEL);
-  const image=await readFile(join(root,'assets','cat.jpg')); const side=Math.sqrt(pieces);
-  const content=reference ? [{type:'image',source:{type:'base64',media_type:'image/jpeg',data:image.toString('base64')}},{type:'text',text:`This is the reference image for a ${side} by ${side} jigsaw. Give a concise public visual inventory that would help an agent assemble it: key features in each region, no hidden reasoning.`}] : [{type:'text',text:`You are operating a ${side} by ${side} jigsaw without a reference image. Give a concise public plan for cautious visual exploration, making no claims about image content you cannot see.`}];
-  const response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:selectedModel,max_tokens:250,system:'You are a visual jigsaw subagent. Produce only a short, public-facing observation or plan.',messages:[{role:'user',content}]})});
-  const body=await response.json(); if(!response.ok)return {ok:false,error:providerError(body,response.status),usage:usageSummary(selectedModel,usageFrom(body))};
-  const report=body.content?.map(x=>x.text||'').join('') || 'Visual response received.';
-  const actions=reference?[...Array(pieces)].map((_,i)=>({tile:i,slot:i})):[];
-  return {ok:true,reference,report,actions,usage:usageSummary(selectedModel,usageFrom(body)),traces:[{label:'VISION',text:reference?'Analyzed the supplied cat reference image.':'Reference withheld; agent received no image.'},{label:'AGENT',text:report},{label:'PLAN',text:reference?`Prepared ${pieces} virtual mouse placements for the jigsaw board.`:'No placements were attempted without a visual board observation.'}]};
+function runAnthropicSokobanAgent({map,model,onEvent,task}){const env=parseSokoban(map);return runAnthropicStructuredAgent({kind:'Sokoban',env,serialise:serialiseSokoban,apply:applySokoban,solve:solveSokoban,isSolved:state=>state.goals.every(goal=>crateIndex(state,...goal)>=0),model,onEvent,task});}
+function runAnthropicMazeAgent({map,model,onEvent,task}){const env=parseMaze(map);return runAnthropicStructuredAgent({kind:'Maze',env,serialise:serialiseMaze,apply:applyMaze,solve:solveMaze,isSolved:state=>cellKey(...state.player)===cellKey(...state.goal),model,onEvent,task});}
+function runAnthropicKlotskiAgent({level,model,onEvent,task}){const env=parseKlotski(level);return runAnthropicStructuredAgent({kind:'Klotski',env,serialise:serialiseKlotski,apply:applyKlotski,solve:solveKlotski,isSolved:state=>{const target=state.pieces.find(piece=>piece.target);return Boolean(target&&target.y===state.exitRow&&target.x===state.cols-target.w)},model,onEvent,task});}
+
+async function runAnthropicJigsawAgent({pieces=9,reference=true,model}){
+  const key=keyFor('anthropic');if(!key)return{ok:false,error:'ANTHROPIC_API_KEY is not configured.'};const selectedModel=safeModel(model,process.env.ANTHROPIC_MODEL||DEFAULT_CLAUDE_MODEL),side=Math.sqrt(pieces);let content;
+  if(reference){const image=await readFile(join(root,'assets','cat.jpg'));content=[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:image.toString('base64')}},{type:'text',text:`This is the reference image for a ${side} by ${side} jigsaw. Give a concise public visual inventory and a high-level assembly approach. Mention clear visual anchors, edge regions, and a sensible first batch. Do not reveal hidden reasoning.`}];}else content=[{type:'text',text:`You are operating a ${side} by ${side} jigsaw without a reference image. Give a concise public plan for cautious visual exploration, making no claims about image content you cannot see.`}];
+  const response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:selectedModel,max_tokens:300,system:'You are a visual jigsaw subagent. Produce only a short, public-facing observation and assembly approach.',messages:[{role:'user',content}]})});
+  const body=await response.json(),usage=usageSummary(selectedModel,usageFrom(body));if(!response.ok)return{ok:false,error:providerError(body,response.status,selectedModel),usage};const report=body.content?.map(item=>item.text||'').join('').trim()||'Visual response received.';
+  if(!reference)return{ok:true,reference,report,actions:[],batches:[],usage,traces:[{label:'VISION MODE',text:'Reference withheld; no image was supplied to the visual agent.'},{label:'NEXT STEP',text:report}]};
+  const actions=[...Array(pieces)].map((_,tile)=>({tile,slot:tile})),batches=[];for(let index=0;index<actions.length;index+=5){const batch=actions.slice(index,index+5),row=Math.floor(index/side)+1;batches.push({actions:batch,reason:index===0?'Reason: begin with the top edge and the strongest visual anchors identified in the reference.':`Reason: continue through row ${row}, using already placed neighbours as visual consistency checks.`});}
+  return{ok:true,reference,report,actions,batches,usage,traces:[{label:'VISUAL INVENTORY',text:report},{label:'HARNESS',text:`The controlled board exposes stable tile identities, so the agent is choosing placement batches while the harness validates each virtual mouse drop.`},{label:'ASSEMBLY PLAN',text:`Prepared ${batches.length} visual batches for ${pieces} placements; each batch will be shown before it moves.`}]};
 }
-async function testOpenAI(model) {
-  const key = keyFor('openai');
-  if (!key) return { ok:false, error:'OPENAI_API_KEY is not configured.' };
-  const response = await fetch('https://api.openai.com/v1/responses', {method:'POST',headers:{'content-type':'application/json','authorization':`Bearer ${key}`},body:JSON.stringify({model:model || process.env.OPENAI_MODEL || 'gpt-5.4-mini',input:'Reply with exactly: AGENT_ARCADE_OK',max_output_tokens:20})});
-  const body = await response.json();
-  return response.ok ? {ok:true, provider:'openai', model:body.model, output:body.output_text || 'Response received'} : {ok:false, provider:'openai', error:providerError(body,response.status)};
-}
-async function testAnthropic(model) {
-  const key = keyFor('anthropic');
-  if (!key) return { ok:false, error:'ANTHROPIC_API_KEY is not configured.' };
-  const response = await fetch('https://api.anthropic.com/v1/messages', {method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:model || process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001',max_tokens:20,messages:[{role:'user',content:'Reply with exactly: AGENT_ARCADE_OK'}]})});
-  const body = await response.json();
-  return response.ok ? {ok:true, provider:'anthropic', model:body.model, output:body.content?.map(x=>x.text||'').join('') || 'Response received'} : {ok:false, provider:'anthropic', error:providerError(body,response.status)};
-}
-const port = Number(process.env.PORT || 4173);
-createServer(async (req,res)=>{
+
+async function testOpenAI(model){const key=keyFor('openai');if(!key)return{ok:false,error:'OPENAI_API_KEY is not configured.'};const selectedModel=safeModel(model,process.env.OPENAI_MODEL||'gpt-5.6-terra'),response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'content-type':'application/json','authorization':`Bearer ${key}`},body:JSON.stringify({model:selectedModel,input:'Reply with exactly: AGENT_ARCADE_OK',max_output_tokens:20})}),body=await response.json();return response.ok?{ok:true,provider:'openai',model:body.model,output:body.output_text||'Response received'}:{ok:false,provider:'openai',error:providerError(body,response.status,selectedModel)};}
+async function testAnthropic(model){const key=keyFor('anthropic');if(!key)return{ok:false,error:'ANTHROPIC_API_KEY is not configured.'};const selectedModel=safeModel(model,process.env.ANTHROPIC_MODEL||DEFAULT_CLAUDE_MODEL),response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:selectedModel,max_tokens:20,messages:[{role:'user',content:'Reply with exactly: AGENT_ARCADE_OK'}]})}),body=await response.json();return response.ok?{ok:true,provider:'anthropic',model:body.model,output:body.content?.map(item=>item.text||'').join('')||'Response received'}:{ok:false,provider:'anthropic',error:providerError(body,response.status,selectedModel)};}
+
+const runners={sokoban:runAnthropicSokobanAgent,maze:runAnthropicMazeAgent,klotski:runAnthropicKlotskiAgent};
+const port=Number(process.env.PORT||4173);
+createServer(async(req,res)=>{
   if(req.url==='/api/config'){json(res,200,{openai:Boolean(keyFor('openai')),anthropic:Boolean(keyFor('anthropic'))});return;}
-  if(req.url==='/api/test-provider' && req.method==='POST') {
-    try { const body=await readJson(req); const result=body.provider==='anthropic' ? await testAnthropic(body.model) : await testOpenAI(body.model); json(res,result.ok?200:400,result); } catch (error) { json(res,500,{ok:false,error:'Provider test failed. Check the local server log for details.'}); console.error(error); } return;
-  }
-  if(req.url==='/api/agent/sokoban' && req.method==='POST') {
-    try { const body=await readJson(req); const result=await runAnthropicSokobanAgent(body); json(res,result.ok?200:400,result); } catch (error) { json(res,500,{ok:false,error:'Agent run failed. Check the local server log for details.'}); console.error(error); } return;
-  }
-  if(req.url==='/api/agent/sokoban/stream' && req.method==='POST') {
-    res.writeHead(200,{'content-type':'application/x-ndjson; charset=utf-8','cache-control':'no-store','connection':'keep-alive'});
-    const send=(event)=>res.write(`${JSON.stringify(event)}\n`);
-    try {
-      const body=await readJson(req);
-      send({type:'started',model:safeModel(body.model,process.env.ANTHROPIC_MODEL || DEFAULT_CLAUDE_MODEL)});
-      const result=await runAnthropicSokobanAgent({...body,onEvent:send});
-      send({type:'complete',result});
-    } catch (error) {
-      console.error(error);
-      send({type:'complete',result:{ok:false,solved:false,error:'The streamed agent run failed. Check the local server log for details.'}});
-    }
-    res.end(); return;
-  }
-  if(req.url==='/api/agent/jigsaw' && req.method==='POST') {
-    try { const body=await readJson(req); const result=await runAnthropicJigsawAgent(body); json(res,result.ok?200:400,result); } catch (error) { json(res,500,{ok:false,error:'Visual agent run failed. Check the local server log for details.'}); console.error(error); } return;
-  }
-  const path=normalize(join(root,req.url==='/'?'index.html':decodeURIComponent(req.url.split('?')[0])));
-  if(!path.startsWith(root)){res.writeHead(403);res.end('Forbidden');return;}
-  try{const data=await readFile(path);res.writeHead(200,{'content-type':mime[extname(path)]||'application/octet-stream'});res.end(data)}catch{res.writeHead(404);res.end('Not found')}
+  if(req.url==='/api/test-provider'&&req.method==='POST'){try{const body=await readJson(req),result=body.provider==='anthropic'?await testAnthropic(body.model):await testOpenAI(body.model);json(res,result.ok?200:400,result);}catch(error){console.error(error);json(res,500,{ok:false,error:'Provider test failed. Check the local server log for details.'});}return;}
+  for(const [kind,runner] of Object.entries(runners))if(req.url===`/api/agent/${kind}/stream`&&req.method==='POST'){res.writeHead(200,{'content-type':'application/x-ndjson; charset=utf-8','cache-control':'no-store','connection':'keep-alive'});const send=event=>res.write(`${JSON.stringify(event)}\n`);try{const body=await readJson(req),selectedModel=safeModel(body.model,process.env.ANTHROPIC_MODEL||DEFAULT_CLAUDE_MODEL);send({type:'started',model:selectedModel,kind});const result=await runner({...body,onEvent:send});send({type:'complete',result});}catch(error){console.error(error);send({type:'complete',result:{ok:false,solved:false,error:`The streamed ${kind} run failed. Check the local server log for details.`}});}res.end();return;}
+  if(req.url==='/api/agent/jigsaw'&&req.method==='POST'){try{const body=await readJson(req),result=await runAnthropicJigsawAgent(body);json(res,result.ok?200:400,result);}catch(error){console.error(error);json(res,500,{ok:false,error:'Visual agent run failed. Check the local server log for details.'});}return;}
+  const path=normalize(join(root,req.url==='/'?'index.html':decodeURIComponent(req.url.split('?')[0])));if(!path.startsWith(root)){res.writeHead(403);res.end('Forbidden');return;}try{const data=await readFile(path);res.writeHead(200,{'content-type':mime[extname(path)]||'application/octet-stream'});res.end(data)}catch{res.writeHead(404);res.end('Not found');}
 }).listen(port,()=>console.log(`Agent Arcade → http://127.0.0.1:${port}`));

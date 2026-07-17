@@ -15,7 +15,7 @@
       <h1>What a Free agent actually does</h1>
     </header>
 
-    <p class="lede">Free agent is the honest, no-route-hints logic-puzzle mode. Claude receives a text representation of the current puzzle and a small set of safe tools. It can reason, delegate to LLM explorers, and write notes in a temporary workspace, but it cannot call the local solver, browse your computer, run shell commands, or access API keys.</p>
+    <p class="lede">Free agent is the honest, no-route-hints logic-puzzle mode. Claude receives a text representation of the current puzzle and a small set of safe tools. It can reason, delegate to LLM explorers, and write and run a small restricted Python calculation in a temporary workspace, but it cannot call the local solver, browse your computer, run shell commands, or access API keys.</p>
 
     <div class="notice"><b>The important distinction:</b> the puzzle's ordinary rules are still enforced. “Free” means no strategic route assistance, not that the agent can walk through walls, alter the level, or bypass the game interface.</div>
 
@@ -32,7 +32,7 @@
     <section class="steps">
       <div class="step"><div class="number">1</div><div><h3>Load a canonical board</h3><p><code>app.js</code> loads the selected level from its local puzzle catalogue. For Sokoban, a compact text map defines walls (<code>#</code>), player (<code>@</code>), crates (<code>$</code>), and targets (<code>.</code>). The local server parses the same map into an independent authoritative state: walls, goals, crate positions, player position, and committed actions.</p></div></div>
       <div class="step"><div class="number">2</div><div><h3>Start a Free-mode request</h3><p>The browser sends the puzzle map, selected model ID, a task, and <code>solverMode: "free"</code> to the local Node server. The server sends a request to Anthropic using the key from its local <code>.env.local</code>. The browser never sees the key.</p></div></div>
-      <div class="step"><div class="number">3</div><div><h3>Claude chooses a tool</h3><p>Claude can inspect the current board, commit a short action batch, ask an LLM explorer for a separate opinion, or save a tiny private note. In Free mode, the server does <em>not</em> include the route-solver tool or the action-checker tool in Claude's available tools.</p></div></div>
+      <div class="step"><div class="number">3</div><div><h3>Claude chooses a tool</h3><p>Claude can inspect the current board, publish a short public checkpoint, commit a short action batch, ask an LLM explorer for a separate opinion, or write and run a small pure-algorithm helper. In Free mode, the server does <em>not</em> include the route-solver tool or the action-checker tool in Claude's available tools.</p></div></div>
       <div class="step"><div class="number">4</div><div><h3>Validate, stream, then render</h3><p>When Claude calls <code>apply_actions</code>, the server tries each move in its canonical puzzle environment. Only legal moves become streamed <code>action</code> events. The browser receives those events as they happen, applies them to its visible board state, and re-renders the board after each one.</p></div></div>
     </section>
 
@@ -41,9 +41,11 @@
       <thead><tr><th>Tool</th><th>What it can do</th><th>Boundary</th></tr></thead>
       <tbody>
         <tr><td><code>observe_board</code></td><td>Returns the current logic board as compact text.</td><td>It reveals only this puzzle state.</td></tr>
+        <tr><td><code>publish_update</code></td><td>Records a concise visible Observation, Plan, Reason, and Expected result.</td><td>It is a human-facing progress checkpoint, not hidden chain-of-thought.</td></tr>
         <tr><td><code>apply_actions</code></td><td>Proposes one to five up/down/left/right moves (or numbered Klotski slides) with a short public reason.</td><td>Every action is checked against the puzzle rules before it changes the authoritative board.</td></tr>
         <tr><td><code>spawn_explorer</code></td><td>Asks a separate Claude call to assess a frozen board snapshot and return one concise finding.</td><td>Explorers are read-only and cannot change the board. A run is capped at three, matching the intended “try three approaches” design.</td></tr>
-        <tr><td><code>write_workspace_file</code></td><td>Saves a small <code>.md</code> or <code>.py</code> note in a temporary per-run folder.</td><td>No execution, shell access, file browsing, or access to your home directory. Empty files are rejected.</td></tr>
+        <tr><td><code>write_workspace_file</code></td><td>Saves a small <code>.md</code> or <code>.py</code> helper in a temporary per-run folder.</td><td>Only a file written by this run may be considered for execution; empty files are rejected.</td></tr>
+        <tr><td><code>run_workspace_python</code></td><td>Runs a previously written <code>.py</code> helper for a small graph, invariant, or enumeration calculation.</td><td>Two-second CPU limit; no filesystem, shell, browser, network, environment variables, API keys, or arbitrary imports.</td></tr>
       </tbody>
     </table>
 
@@ -60,8 +62,8 @@
       <p>“Sandbox” is used in two different, deliberately narrow ways in this app. It is not a claim that Claude has a full virtual computer.</p>
       <div class="grid">
         <article class="good"><h3>Puzzle sandbox</h3><p>The server has an in-memory copy of the puzzle. <code>apply_actions</code> can affect only that copy. Walls, crates, target conditions, and long-axis Klotski rules are enforced there.</p></article>
-        <article class="good"><h3>Temporary workspace sandbox</h3><p>A requested helper file is written under the operating system temporary folder, in a per-run directory. It is not the repository, not the browser, and not your documents folder.</p></article>
-        <article class="danger"><h3>What it is not</h3><p>It is not a Codex-style full workstation. The model cannot execute the <code>.py</code> note it writes, inspect other local files, start processes, or touch the visible browser outside the puzzle interface.</p></article>
+        <article class="good"><h3>Temporary workspace sandbox</h3><p>A requested helper file is written under the operating system temporary folder, in a per-run directory. A <code>.py</code> file can be evaluated only by the restricted runner, which permits pure calculation with a small module allow-list.</p></article>
+        <article class="danger"><h3>What it is not</h3><p>It is not a Codex-style full workstation. The model cannot run arbitrary Python, inspect other local files, start processes, use the network, read keys or environment variables, or touch the visible browser outside the puzzle interface.</p></article>
         <article class="danger"><h3>Why validation remains</h3><p>Validation prevents malformed or illegal actions from corrupting the game. It does not reveal a plan or make a strategic choice for Free agent.</p></article>
       </div>
     </section>
@@ -70,10 +72,16 @@
     <p>The server does not wait for a complete solution. It responds as newline-delimited JSON (NDJSON), allowing an action to arrive while the agent continues working. The browser queues each event, animates a legal action, updates the board, and then waits for the next event.</p>
     <section class="card">
       <div class="event"><b><code>started</code></b><span>Model connected and the selected run style is announced.</span></div>
-      <div class="event"><b><code>trace</code></b><span>Public milestones: observation, short decision reason, explorer report, workspace save, or safety status. Private planning prose is filtered out.</span></div>
+      <div class="event"><b><code>trace</code></b><span>A readable operational journal: observation, plan, concise reason, expected result, explorer branch, helper output, action batch, or safety status. Private planning prose is filtered out.</span></div>
       <div class="event"><b><code>action</code></b><span>A server-validated move. Only this event changes the visible puzzle.</span></div>
       <div class="event"><b><code>usage</code></b><span>Running token count and an estimated API cost are sent to the browser.</span></div>
       <div class="event"><b><code>complete</code></b><span>Final result. The UI marks a run solved only when its visible board is actually solved.</span></div>
+    </section>
+
+    <h2>Initial agent contract</h2>
+    <section class="card">
+      <p>The initial prompt tells the main agent to use this rhythm: <b>observe the authoritative board; publish a short checkpoint with Observation, Plan, Reason, and Expected result; use distinct explorer branches early on nontrivial puzzles; write and run a restricted Python helper only when a graph, invariant, or enumeration genuinely helps; then commit at most five legal actions and re-observe.</b></p>
+      <p>It also tells the model that explorers should have different jobs—such as deadlock risk, crate-to-goal ordering, and player routing—and that it must not emit private chain-of-thought. The resulting journal is intentionally a useful explanation of its operational choices, rather than a raw internal transcript.</p>
     </section>
 
     <h2>Why Microban 31 was difficult</h2>
@@ -83,7 +91,7 @@
     <table class="tool-table">
       <thead><tr><th>Mode</th><th>Strategic assistance</th><th>Best use</th></tr></thead>
       <tbody>
-        <tr><td><b>Free agent</b></td><td><span class="yes">None.</span> It has observation, legal actions, explorers, and temporary notes only.</td><td>Honest model capability and agent-orchestration experiments.</td></tr>
+        <tr><td><b>Free agent</b></td><td><span class="yes">None.</span> It has observation, legal actions, explorers, and a restricted self-written Python calculation only.</td><td>Honest model capability and agent-orchestration experiments.</td></tr>
         <tr><td><b>Action checker</b></td><td>Checks only a candidate batch that Claude chose. It does not search or suggest moves.</td><td>Testing deliberate control while avoiding accidental illegal moves.</td></tr>
         <tr><td><b>Solver aid</b></td><td>Claude may explicitly request a complete local deterministic route.</td><td>Reliable demonstrations, harness testing, and comparing model orchestration against an oracle.</td></tr>
       </tbody>

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Arcade — Free Agent Loop</title>
+  <style>
+    :root{--ink:#11110f;--paper:#faf8f1;--cream:#f3eddd;--orange:#ff5a17;--blue:#3288d6;--green:#19ae58;--yellow:#f8c500;--line:#d9d2c1;--muted:#66635b}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:Arial,Helvetica,sans-serif;line-height:1.48}.page{max-width:1100px;margin:auto;padding:34px 22px 70px}header{padding:36px;border-radius:26px;background:linear-gradient(135deg,#ff5a17,#f8c500);margin-bottom:28px}header p{margin:0 0 11px;font-size:12px;font-weight:bold;letter-spacing:1px;text-transform:uppercase}h1{max-width:750px;margin:0;font-size:clamp(42px,8vw,86px);letter-spacing:-5px;line-height:.87}h2{margin:46px 0 14px;font-size:29px;line-height:1;letter-spacing:-1.5px}h3{margin:0 0 7px;font-size:17px}p{max-width:820px}code{padding:2px 5px;border-radius:4px;background:#e9e3d5;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em}.lede{max-width:790px;font-size:19px}.notice{margin:22px 0;padding:16px 18px;border-left:6px solid var(--orange);border-radius:0 12px 12px 0;background:#fff0e8}.flow{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:10px;align-items:stretch;margin:25px 0}.node{position:relative;padding:16px;border:2px solid var(--ink);border-radius:15px;background:#fff;min-height:128px}.node:after{content:'→';position:absolute;right:-18px;top:45%;z-index:2;display:grid;place-items:center;width:25px;height:25px;border-radius:50%;background:var(--ink);color:#fff}.node:last-child:after{display:none}.node:nth-child(2){background:#dcecff}.node:nth-child(3){background:#fff1d6}.node:nth-child(4){background:#dff4e5}.node:nth-child(5){background:#fff}.node b{display:block;font-size:11px;letter-spacing:1px;text-transform:uppercase}.node span{display:block;margin-top:8px;font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.card{padding:22px;border:1px solid var(--line);border-radius:17px;background:#fff}.card strong{font-size:12px;letter-spacing:1px;text-transform:uppercase}.card p{margin-bottom:0;font-size:14px}.steps{display:grid;gap:0;margin:24px 0;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff}.step{display:grid;grid-template-columns:58px 1fr;gap:15px;padding:18px 20px;border-bottom:1px solid var(--line)}.step:last-child{border-bottom:0}.number{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--blue);color:white;font-weight:bold}.step:nth-child(2) .number{background:var(--orange)}.step:nth-child(3) .number{background:var(--yellow);color:#111}.step:nth-child(4) .number{background:var(--green)}.step p{margin:4px 0 0;font-size:14px}.tool-table{width:100%;border-collapse:collapse;margin:18px 0;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}.tool-table th,.tool-table td{padding:13px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}.tool-table tr:last-child td{border-bottom:0}.tool-table th{font-size:11px;letter-spacing:1px;text-transform:uppercase;background:var(--cream)}.yes{color:#137542;font-weight:bold}.no{color:#b13e1f;font-weight:bold}.event{display:grid;grid-template-columns:145px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}.event:last-child{border-bottom:0}.event b{font-size:12px;letter-spacing:.6px}.boundary{margin:22px 0;padding:22px;border:2px dashed #716c60;border-radius:19px;background:#f5f0e3}.boundary .grid{margin-top:15px}.danger{padding:17px;border-radius:13px;background:#f5d7d0}.good{padding:17px;border-radius:13px;background:#dff4e5}.small{font-size:13px;color:var(--muted)}@media(max-width:800px){.flow{grid-template-columns:1fr}.node:after{content:'↓';right:auto;top:auto;bottom:-19px;left:calc(50% - 12px)}.grid{grid-template-columns:1fr}.step{grid-template-columns:42px 1fr}.event{grid-template-columns:1fr;gap:2px}}
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <p>Agent Arcade · Technical explainer</p>
+      <h1>What a Free agent actually does</h1>
+    </header>
+
+    <p class="lede">Free agent is the honest, no-route-hints logic-puzzle mode. Claude receives a text representation of the current puzzle and a small set of safe tools. It can reason, delegate to LLM explorers, and write notes in a temporary workspace, but it cannot call the local solver, browse your computer, run shell commands, or access API keys.</p>
+
+    <div class="notice"><b>The important distinction:</b> the puzzle's ordinary rules are still enforced. “Free” means no strategic route assistance, not that the agent can walk through walls, alter the level, or bypass the game interface.</div>
+
+    <h2>One run, end to end</h2>
+    <section class="flow" aria-label="Free agent request flow">
+      <div class="node"><b>1 · Browser</b><span>You choose a level, model, and <em>Free agent</em>.</span></div>
+      <div class="node"><b>2 · Local server</b><span>It creates the canonical in-memory puzzle state and holds the API key locally.</span></div>
+      <div class="node"><b>3 · Claude</b><span>It gets a tool contract plus observations; it never receives your key.</span></div>
+      <div class="node"><b>4 · Validated event</b><span>The server checks each proposed action against the real puzzle rules.</span></div>
+      <div class="node"><b>5 · Render</b><span>The browser animates only committed legal actions and updates the trace.</span></div>
+    </section>
+
+    <h2>Step-by-step loop</h2>
+    <section class="steps">
+      <div class="step"><div class="number">1</div><div><h3>Load a canonical board</h3><p><code>app.js</code> loads the selected level from its local puzzle catalogue. For Sokoban, a compact text map defines walls (<code>#</code>), player (<code>@</code>), crates (<code>$</code>), and targets (<code>.</code>). The local server parses the same map into an independent authoritative state: walls, goals, crate positions, player position, and committed actions.</p></div></div>
+      <div class="step"><div class="number">2</div><div><h3>Start a Free-mode request</h3><p>The browser sends the puzzle map, selected model ID, a task, and <code>solverMode: "free"</code> to the local Node server. The server sends a request to Anthropic using the key from its local <code>.env.local</code>. The browser never sees the key.</p></div></div>
+      <div class="step"><div class="number">3</div><div><h3>Claude chooses a tool</h3><p>Claude can inspect the current board, commit a short action batch, ask an LLM explorer for a separate opinion, or save a tiny private note. In Free mode, the server does <em>not</em> include the route-solver tool or the action-checker tool in Claude's available tools.</p></div></div>
+      <div class="step"><div class="number">4</div><div><h3>Validate, stream, then render</h3><p>When Claude calls <code>apply_actions</code>, the server tries each move in its canonical puzzle environment. Only legal moves become streamed <code>action</code> events. The browser receives those events as they happen, applies them to its visible board state, and re-renders the board after each one.</p></div></div>
+    </section>
+
+    <h2>Tools available to Free agent</h2>
+    <table class="tool-table">
+      <thead><tr><th>Tool</th><th>What it can do</th><th>Boundary</th></tr></thead>
+      <tbody>
+        <tr><td><code>observe_board</code></td><td>Returns the current logic board as compact text.</td><td>It reveals only this puzzle state.</td></tr>
+        <tr><td><code>apply_actions</code></td><td>Proposes one to five up/down/left/right moves (or numbered Klotski slides) with a short public reason.</td><td>Every action is checked against the puzzle rules before it changes the authoritative board.</td></tr>
+        <tr><td><code>spawn_explorer</code></td><td>Asks a separate Claude call to assess a frozen board snapshot and return one concise finding.</td><td>Explorers are read-only and cannot change the board. A run is capped at three, matching the intended “try three approaches” design.</td></tr>
+        <tr><td><code>write_workspace_file</code></td><td>Saves a small <code>.md</code> or <code>.py</code> note in a temporary per-run folder.</td><td>No execution, shell access, file browsing, or access to your home directory. Empty files are rejected.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Tools deliberately missing in Free mode</h2>
+    <section class="grid">
+      <article class="card"><strong class="no">Not available</strong><h3><code>run_builtin_solver</code></h3><p>This is the local deterministic BFS route solver. It is absent from the tool list, so Claude cannot ask it for a completion path.</p></article>
+      <article class="card"><strong class="no">Not available</strong><h3><code>verify_actions</code></h3><p>This is the proposed-batch checker used by Action checker mode. It is absent too, so Free agent cannot preflight its own candidate moves.</p></article>
+      <article class="card"><strong class="no">Not available</strong><h3>Computer / browser control</h3><p>Logic runs do not provide mouse control, URLs, shell commands, arbitrary local files, network browsing, or operating-system access.</p></article>
+      <article class="card"><strong class="no">Not available</strong><h3>Your secrets</h3><p>Claude never receives <code>.env.local</code>, API keys, terminal output, or the host filesystem. The Node server uses the key only to make the provider request.</p></article>
+    </section>
+
+    <h2>What “sandbox” means here</h2>
+    <section class="boundary">
+      <p>“Sandbox” is used in two different, deliberately narrow ways in this app. It is not a claim that Claude has a full virtual computer.</p>
+      <div class="grid">
+        <article class="good"><h3>Puzzle sandbox</h3><p>The server has an in-memory copy of the puzzle. <code>apply_actions</code> can affect only that copy. Walls, crates, target conditions, and long-axis Klotski rules are enforced there.</p></article>
+        <article class="good"><h3>Temporary workspace sandbox</h3><p>A requested helper file is written under the operating system temporary folder, in a per-run directory. It is not the repository, not the browser, and not your documents folder.</p></article>
+        <article class="danger"><h3>What it is not</h3><p>It is not a Codex-style full workstation. The model cannot execute the <code>.py</code> note it writes, inspect other local files, start processes, or touch the visible browser outside the puzzle interface.</p></article>
+        <article class="danger"><h3>Why validation remains</h3><p>Validation prevents malformed or illegal actions from corrupting the game. It does not reveal a plan or make a strategic choice for Free agent.</p></article>
+      </div>
+    </section>
+
+    <h2>How the browser stays live</h2>
+    <p>The server does not wait for a complete solution. It responds as newline-delimited JSON (NDJSON), allowing an action to arrive while the agent continues working. The browser queues each event, animates a legal action, updates the board, and then waits for the next event.</p>
+    <section class="card">
+      <div class="event"><b><code>started</code></b><span>Model connected and the selected run style is announced.</span></div>
+      <div class="event"><b><code>trace</code></b><span>Public milestones: observation, short decision reason, explorer report, workspace save, or safety status. Private planning prose is filtered out.</span></div>
+      <div class="event"><b><code>action</code></b><span>A server-validated move. Only this event changes the visible puzzle.</span></div>
+      <div class="event"><b><code>usage</code></b><span>Running token count and an estimated API cost are sent to the browser.</span></div>
+      <div class="event"><b><code>complete</code></b><span>Final result. The UI marks a run solved only when its visible board is actually solved.</span></div>
+    </section>
+
+    <h2>Why Microban 31 was difficult</h2>
+    <p>Microban 31 is a real multi-crate Sokoban problem. In Free mode, Claude must derive the crate ordering and player routing from the text board itself. It may ask its own LLM explorers for independent ideas, but those are opinions, not a deterministic search result. Sonnet 5 placed the first crates correctly in the test run, then became inefficient at resolving the remaining crate. That is a real limitation of the current Free-agent setup, rather than a hidden solver failure.</p>
+
+    <h2>The three modes compared</h2>
+    <table class="tool-table">
+      <thead><tr><th>Mode</th><th>Strategic assistance</th><th>Best use</th></tr></thead>
+      <tbody>
+        <tr><td><b>Free agent</b></td><td><span class="yes">None.</span> It has observation, legal actions, explorers, and temporary notes only.</td><td>Honest model capability and agent-orchestration experiments.</td></tr>
+        <tr><td><b>Action checker</b></td><td>Checks only a candidate batch that Claude chose. It does not search or suggest moves.</td><td>Testing deliberate control while avoiding accidental illegal moves.</td></tr>
+        <tr><td><b>Solver aid</b></td><td>Claude may explicitly request a complete local deterministic route.</td><td>Reliable demonstrations, harness testing, and comparing model orchestration against an oracle.</td></tr>
+      </tbody>
+    </table>
+
+    <p class="small">Implementation locations: browser state and rendering are in <code>app.js</code>; the streamed tool loop and puzzle validators are in <code>server.mjs</code>. This report describes the current logic-puzzle implementation, not a future full computer-use environment.</p>
+  </main>
+</body>
+</html>

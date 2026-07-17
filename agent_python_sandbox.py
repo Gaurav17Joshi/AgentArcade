@@ -103,8 +103,9 @@ SAFE_BUILTINS = {
     "abs": abs, "all": all, "any": any, "bool": bool, "dict": dict,
     "enumerate": enumerate, "filter": filter, "float": float, "int": int,
     "len": len, "list": list, "map": map, "max": max, "min": min,
-    "range": range, "reversed": reversed, "round": round, "set": set,
-    "sorted": sorted, "str": str, "sum": sum, "tuple": tuple, "zip": zip,
+    "range": range, "repr": repr, "reversed": reversed, "round": round,
+    "set": set, "sorted": sorted, "str": str, "sum": sum, "tuple": tuple,
+    "zip": zip,
     "Exception": Exception, "ValueError": ValueError, "print": None,
     "__import__": safe_import,
 }

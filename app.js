@@ -43,7 +43,9 @@ const modelPresets={
  claude:[['claude-fable-5','Claude Fable 5 · frontier'],['claude-opus-4-8','Claude Opus 4.8 · deep'],['claude-sonnet-5','Claude Sonnet 5 · balanced'],['claude-haiku-4-5-20251001','Claude Haiku 4.5 · fast']],
  openai:[['gpt-5.6-sol','GPT-5.6 Sol · strongest'],['gpt-5.6-terra','GPT-5.6 Terra · balanced'],['gpt-5.6-luna','GPT-5.6 Luna · fast'],['gpt-5.4-mini','GPT-5.4 mini · economical']]
 };
-let type='sokoban',levelId='s2',state,selectedPiece,selectedTile,workspaces=[{id:'main',name:'Main agent',status:'ready',parent:'Authoritative workspace'}],activeWorkspace='main',trace=[],isRunning=false,timer,modelChoice='local',modelId=modelDefaults.local,strategyChoice='explore',pickerType='sokoban',liveRun={timer:null,startedAt:0,events:[]},runGeneration=0,lastUsage=null;
+const runModeDetails={free:'The agent receives no route hints. It may observe, reason, delegate, and create temporary helpers, but must find its own strategy.',verify:'The agent may check a batch it proposed itself. The checker reports only whether that batch is legal; it never searches for a route.',assist:'The agent may explicitly request a local deterministic route. This is for demonstrations and comparison, not independent puzzle solving.'};
+const runModeLabels={free:'Free agent',verify:'Action checker',assist:'Solver aid'};
+let type='sokoban',levelId='s2',state,selectedPiece,selectedTile,workspaces=[{id:'main',name:'Main agent',status:'ready',parent:'Authoritative workspace'}],activeWorkspace='main',trace=[],isRunning=false,timer,modelChoice='local',modelId=modelDefaults.local,runMode='free',strategyChoice='explore',pickerType='sokoban',liveRun={timer:null,startedAt:0,events:[]},runGeneration=0,lastUsage=null;
 const dirs={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
 const current=()=>puzzles[type],level=()=>current().levels.find(x=>x.id===levelId),pos=(x,y)=>`${x},${y}`;
 function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');clearTimeout(e.t);e.t=setTimeout(()=>e.classList.remove('show'),2400)}
@@ -108,14 +110,18 @@ function renderDrawerContent(kind){
   if(kind==='agents'){
     $('#model-select').value=modelChoice;
     $('#model-id').value=modelId;
-    const preset=$('#model-preset'),presetLabel=$('#model-preset-label'),customLabel=$('#custom-model-label'),help=$('#model-help');
+    const preset=$('#model-preset'),presetLabel=$('#model-preset-label'),customLabel=$('#custom-model-label'),help=$('#model-help'),mode=$('#run-mode'),modeHelp=$('#run-mode-help');
     const options=modelPresets[modelChoice]||[];
     presetLabel.hidden=!options.length;customLabel.hidden=!options.length;
     if(options.length){preset.innerHTML=`<option value="">Custom model ID…</option>${options.map(([id,label])=>`<option value="${id}" ${id===modelId?'selected':''}>${label}</option>`).join('')}`;preset.value=options.some(([id])=>id===modelId)?modelId:''}
     help.textContent=modelChoice==='claude'?'Preset IDs are current Anthropic API model IDs. Sonnet 5 is claude-sonnet-5 — it does not use a dated suffix.':modelChoice==='openai'?'Choose a current OpenAI preset for a local key/model check, or enter a model ID your account can access.': 'Runs entirely in the browser with deterministic puzzle solvers.';
+    mode.value=runMode;
+    mode.disabled=modelChoice!=='claude'||type==='jigsaw';
+    modeHelp.textContent=type==='jigsaw'?'Run styles apply to live logic puzzles. Jigsaw has no route solver in this build.':modelChoice!=='claude'?'Run styles apply when a live Anthropic logic agent is selected.':runModeDetails[runMode];
     $('#model-select').onchange=e=>{const previous=modelChoice;modelChoice=e.target.value;if(modelId===modelDefaults[previous]||!modelId)modelId=modelDefaults[modelChoice];renderDrawerContent('agents')};
     preset.onchange=e=>{if(e.target.value){modelId=e.target.value;$('#model-id').value=modelId}else $('#model-id').focus()};
     $('#model-id').onchange=e=>{modelId=e.target.value.trim()||modelDefaults[modelChoice];if(options.some(([id])=>id===modelId))preset.value=modelId;else if(options.length)preset.value=''};
+    mode.onchange=e=>{runMode=e.target.value;modeHelp.textContent=runModeDetails[runMode]};
     $('#run-from-drawer').onclick=run;
     $('#toggle-reference').hidden=type!=='jigsaw';
     $('#toggle-reference').onclick=()=>{if(type!=='jigsaw'){toast('Reference mode is available in Jigsaw.');return}state.reference=!state.reference;renderBoard();log('VISION MODE',state.reference?'Reference image provided to the agent.':'Reference image withheld from the agent.');};
@@ -166,14 +172,14 @@ function publicTrace(entry){
   updateLiveRun('Claude is working in short batches.',briefTrace(entry.text,112),label.replace('_',' '));
 }
 async function streamLogicRun(kind,generation){
-  const body={model:modelId,task:`Solve this ${kind} puzzle as a team. Inspect the board, decide whether an explorer or a small private helper helps, then commit deliberate batches of one to five legal actions. Every batch must state one concise public Reason based on visible board facts. Never expose hidden reasoning.`};
+  const body={model:modelId,solverMode:runMode,task:`Solve this ${kind} puzzle as a team. Inspect the board, decide whether an explorer or a small private helper helps, then commit deliberate batches of one to five legal actions. Every batch must state one concise public Reason based on visible board facts. Never expose hidden reasoning.`};
   if(kind==='Klotski')body.level=level();else body.map=level().map;
   const response=await fetch(`/api/agent/${kind.toLowerCase()}/stream`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   if(!response.ok||!response.body){let message='The local server could not start a streamed agent run.';try{message=(await response.json()).error||message}catch{}throw new Error(message)}
   const decoder=new TextDecoder(),reader=response.body.getReader();let buffer='',pending=Promise.resolve(),result;
-  const enqueueAction=event=>{pending=pending.then(async()=>{if(generation!==runGeneration||state.solved)return;const action=event.action??event.direction;let message,moved;if(kind==='Klotski'){message=`Verified slide ${String(event.index).padStart(2,'0')} · ${action.id}${action.direction[0].toUpperCase()}`;moved=moveK(action.direction,true,action.id)}else{message=`Verified move ${String(event.index).padStart(2,'0')} · ${({up:'↑ Up',down:'↓ Down',left:'← Left',right:'→ Right'})[action]}`;moved=move(action,true)}log('EXECUTION',message,'action');$('#run-status').textContent='RUNNING';if(!moved)throw new Error(`The streamed route proposed an illegal action: ${typeof action==='string'?action:`${action.id}${action.direction}`}.`);updateLiveRun(`${kind} agent is applying the next verified batch.`,message,`Step ${event.index}`);await new Promise(resolve=>setTimeout(resolve,300))})};
+  const enqueueAction=event=>{pending=pending.then(async()=>{if(generation!==runGeneration||state.solved)return;const action=event.action??event.direction;let message,moved;if(kind==='Klotski'){message=`Committed slide ${String(event.index).padStart(2,'0')} · ${action.id}${action.direction[0].toUpperCase()}`;moved=moveK(action.direction,true,action.id)}else{message=`Committed move ${String(event.index).padStart(2,'0')} · ${({up:'↑ Up',down:'↓ Down',left:'← Left',right:'→ Right'})[action]}`;moved=move(action,true)}log('EXECUTION',message,'action');$('#run-status').textContent='RUNNING';if(!moved)throw new Error(`The streamed route proposed an illegal action: ${typeof action==='string'?action:`${action.id}${action.direction}`}.`);updateLiveRun(`${kind} agent is applying the next action batch.`,message,`Step ${event.index}`);await new Promise(resolve=>setTimeout(resolve,300))})};
   const handle=event=>{
-    if(event.type==='started'){log('RUN START',`Connected to ${event.model}. The main agent will stream short ${kind} batches.`,'report');updateLiveRun(`${kind} agent is surveying the board.`,`Connected to ${event.model}; the first deliberate batch is being prepared.`,'Model connected')}
+    if(event.type==='started'){const style=event.runStyle||runModeLabels[runMode];log('RUN START',`Connected to ${event.model}. ${style}: the main agent will stream short ${kind} batches.`,'report');updateLiveRun(`${kind} agent is surveying the board.`,`${style}; the first deliberate batch is being prepared.`,'Model connected')}
     if(event.type==='trace')publicTrace(event.entry);
     if(event.type==='usage')setUsage(event.usage);
     if(event.type==='explorer'){const existing=workspaces.find(w=>w.name===event.explorer.name);if(!existing){const w=spawn(true);w.name=event.explorer.name;w.status='reported';w.parent='Frozen board snapshot';if($('#drawer').classList.contains('show')&&$('#drawer-kicker').textContent==='AGENT CONTROL')renderDrawerContent('agents')}}
@@ -183,7 +189,7 @@ async function streamLogicRun(kind,generation){
   while(true){const {done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop();for(const line of lines){if(!line.trim())continue;try{handle(JSON.parse(line))}catch{throw new Error('The streamed agent response was malformed.')}}}
   if(buffer.trim())handle(JSON.parse(buffer));
   await pending;if(generation!==runGeneration)return;if(result?.usage)setUsage(result.usage);if(!result?.ok||!result?.solved)throw new Error(result?.error||'The agent stopped before it produced a solved board.');if(!state.solved)throw new Error('The streamed run ended before the visible board reached a solved state.');isRunning=false;$('#run-status').textContent='SOLVED';
-  log('RUN COMPLETE',`${modelId} solved ${level().name} with ${result.actions.length} verified actions.${result.explorers?.length?` ${result.explorers.length} explorer report${result.explorers.length===1?' was':'s were'} used.`:' The main agent chose to work alone.'}`,'report');
+  log('RUN COMPLETE',`${modelId} solved ${level().name} with ${result.actions.length} validated actions.${result.explorers?.length?` ${result.explorers.length} explorer report${result.explorers.length===1?' was':'s were'} used.`:' The main agent chose to work alone.'}`,'report');
 }
 run = async function(){
   const generation=runGeneration;

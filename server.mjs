@@ -19,6 +19,8 @@ const DEFAULT_CLAUDE_MODEL='claude-sonnet-5';
 const safeModel=(model,fallback)=>typeof model==='string'&&/^[a-zA-Z0-9._:-]{2,120}$/.test(model)?model:fallback;
 const normaliseSolverMode=mode=>['free','verify','assist'].includes(mode)?mode:'free';
 const solverModeLabel=mode=>({free:'Free agent · no route hints',verify:'Action checker · self-proposed batches only',assist:'Solver aid · route on request'})[mode];
+const thinkingConfigFor=model=>/claude-(sonnet-5|opus)/.test(model)?{thinking:{type:'disabled'}}:{};
+const MAX_EXPLORERS=3;
 const directionMap={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
 const cellKey=(x,y)=>`${x},${y}`;
 
@@ -68,18 +70,19 @@ function estimateClaudeCost(model,usage){const id=String(model).toLowerCase();co
 const usageSummary=(model,usage)=>({model,inputTokens:usage.inputTokens,outputTokens:usage.outputTokens,estimatedCostUsd:estimateClaudeCost(model,usage)});
 
 async function runAnthropicExplorer(key,board,task,model,kind){
-  const response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model,max_tokens:180,system:`You are a concise ${kind} exploration subagent. Give one concrete public report. Do not reveal hidden chain-of-thought.`,messages:[{role:'user',content:`Task: ${task}\n\nBoard:\n${board}`}]})});
-  const body=await response.json();return response.ok?{ok:true,report:body.content?.map(item=>item.text||'').join(''),usage:usageFrom(body)}:{ok:false,report:`Explorer could not run: ${providerError(body,response.status,model)}`,usage:usageFrom(body)};
+  const response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model,max_tokens:220,system:`You are a concise ${kind} exploration subagent. Return one concrete public finding grounded in the board, not a coordinate transcript or a chain-of-thought. If you cannot reach a conclusion, say so plainly.`,messages:[{role:'user',content:`Task: ${String(task||'Assess one distinct strategy.').slice(0,1200)}\n\nBoard:\n${board}`}],...thinkingConfigFor(model)})});
+  const body=await response.json(),report=(body.content||[]).filter(item=>item.type==='text').map(item=>item.text||'').join('').replace(/\s+/g,' ').trim();return response.ok?{ok:true,report:report||'Explorer returned no usable public finding.',usage:usageFrom(body)}:{ok:false,report:`Explorer could not run: ${providerError(body,response.status,model)}`,usage:usageFrom(body)};
 }
+function publicAgentNote(text){const note=String(text||'').replace(/\s+/g,' ').trim();if(!note||/\b(let me|i need|i'll|i will|think|analy[sz]e|parse|coordinate|row\s*\d|col(?:umn)?\s*\d)\b/i.test(note))return'';return note.slice(0,220);}
 function actionSchema(kind){const isKlotski=String(kind).toLowerCase()==='klotski';return isKlotski?{type:'array',items:{type:'object',properties:{id:{type:'string',description:'The printed tile number as a string, for example "2". This field is required.'},direction:{type:'string',enum:['up','down','left','right']}},required:['id','direction']},minItems:1,maxItems:5}:{type:'array',items:{type:'string',enum:['up','down','left','right']},minItems:1,maxItems:5};}
 function prettyAction(kind,action){const isKlotski=String(kind).toLowerCase()==='klotski',normalized=isKlotski?normaliseKlotskiAction(action):action;return isKlotski?`${normalized.id}${normalized.direction[0].toUpperCase()}`:normalized;}
 async function runAnthropicStructuredAgent({kind,env,serialise,apply,solve,isSolved,model,onEvent,task,solverMode}){
   const key=keyFor('anthropic');if(!key)return{ok:false,error:'ANTHROPIC_API_KEY is not configured.'};
-  const selectedModel=safeModel(model,process.env.ANTHROPIC_MODEL||DEFAULT_CLAUDE_MODEL),runId=`run-${Date.now()}`,traces=[],explorers=[],mode=normaliseSolverMode(solverMode);let usage={inputTokens:0,outputTokens:0};
+  const selectedModel=safeModel(model,process.env.ANTHROPIC_MODEL||DEFAULT_CLAUDE_MODEL),runId=`run-${Date.now()}`,traces=[],explorers=[],mode=normaliseSolverMode(solverMode);let usage={inputTokens:0,outputTokens:0},idleToolTurns=0;
   // Sonnet 5 enables adaptive thinking by default. For this interaction-first
   // arcade runner we turn it off, keeping small-board tool turns responsive.
   // Fable requires adaptive thinking, so it remains untouched.
-  const thinkingConfig=/claude-(sonnet-5|opus)/.test(selectedModel)?{thinking:{type:'disabled'}}:{};
+  const thinkingConfig=thinkingConfigFor(selectedModel);
   const emit=event=>{try{onEvent?.(event)}catch{}};const record=(label,text)=>{const entry={label,text};traces.push(entry);emit({type:'trace',entry});};
   const tools=[
     {name:'observe_board',description:`Read the current ${kind} board as a compact text state.`,input_schema:{type:'object',properties:{}}},
@@ -92,7 +95,7 @@ async function runAnthropicStructuredAgent({kind,env,serialise,apply,solve,isSol
   const modeInstruction=mode==='free'?'Run style: Free agent. No route solver or action checker is available. Derive strategy from the board yourself.':mode==='verify'?'Run style: Action checker. You may test a batch you proposed using verify_actions before applying it. The checker never searches for or reveals a route.':'Run style: Solver aid. run_builtin_solver is available only if you explicitly request a local deterministic route; it is not an explorer or your own reasoning.';
   const messages=[{role:'user',content:`${task||`Solve this ${kind} puzzle.`}\nYou are the main agent. Use tools to inspect and act. Work in batches of at most five actions and include one concise public “Reason” in each batch. You may spawn explorers or write a small private helper. ${modeInstruction} Continue until solved, or report that no verified route exists. Never output hidden chain-of-thought.`}];
   for(let turn=0;turn<36;turn++){
-    const response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:selectedModel,max_tokens:360,system:`You control a safe, isolated ${kind} workspace. Use tools rather than guessing. Public text must be brief and factual.`,tools,messages,...thinkingConfig})});
+    const response=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:selectedModel,max_tokens:220,system:`You control a safe, isolated ${kind} workspace. Use exactly one or more tools in every turn; do not answer with text-only commentary. Text is a public status feed, not private reasoning: never narrate thinking, tool plans, or coordinate derivations. Use text only for a brief factual observation, explorer outcome, or final status. Put a concise observable rationale only in apply_actions.reason.`,tools,messages,...thinkingConfig})});
     const body=await response.json();usage=addUsage(usage,usageFrom(body));emit({type:'usage',usage:usageSummary(selectedModel,usage)});if(!response.ok)return{ok:false,error:providerError(body,response.status,selectedModel),traces,explorers,usage:usageSummary(selectedModel,usage)};
     // Thinking is disabled for Sonnet/Opus interactive runs. If a model does
     // return signed thinking, preserve the original blocks unchanged for the API
@@ -100,7 +103,7 @@ async function runAnthropicStructuredAgent({kind,env,serialise,apply,solve,isSol
     const assistantBlocks=body.content||[];
     if(assistantBlocks.length)messages.push({role:'assistant',content:assistantBlocks});const toolResults=[];
     for(const item of assistantBlocks){
-      if(item.type==='text')record('AGENT NOTE',item.text);
+      if(item.type==='text'){const note=publicAgentNote(item.text);if(note)record('AGENT NOTE',note);}
       if(item.type!=='tool_use')continue;let output;
       if(item.name==='observe_board'){output={board:serialise(env),actions:env.actions.length};record('OBSERVATION','Read the current board state before committing another batch.');}
       if(item.name==='apply_actions'){
@@ -114,13 +117,14 @@ async function runAnthropicStructuredAgent({kind,env,serialise,apply,solve,isSol
         record('ACTION CHECK',failure?`Rejected the proposed batch after ${checked.length} legal action${checked.length===1?'':'s'}: ${failure}. No route information was provided.`:`Checked ${checked.length} self-proposed action${checked.length===1?'':'s'}: legal. No route information was provided.`);
       }
       if(item.name==='run_builtin_solver'){const plan=solve(structuredClone(env));output={found:plan!==null,plan};record('SOLVER AID',plan!==null?`Local route solver returned a ${plan.length}-action completion route at the agent’s request.`:'Local route solver found no safe completion route from this state.');}
-      if(item.name==='spawn_explorer'){const result=await runAnthropicExplorer(key,serialise(env),item.input.task,selectedModel,kind);usage=addUsage(usage,result.usage);emit({type:'usage',usage:usageSummary(selectedModel,usage)});const explorer={name:`Explorer ${explorers.length+1}`,task:item.input.task,report:result.report};explorers.push(explorer);output=explorer;record('EXPLORER',`${explorer.name}: ${result.report}`);emit({type:'explorer',explorer});}
-      if(item.name==='write_workspace_file'){const raw=(item.input.name||'notes.md').replace(/[^a-zA-Z0-9._-]/g,'_').replace(/^\.+/,'').slice(0,80),name=/\.(md|py)$/.test(raw)?raw:`${raw}.md`,folder=join('/private/tmp','agent-arcade-workspaces',runId);await mkdir(folder,{recursive:true});await writeFile(join(folder,name),String(item.input.content||'').slice(0,6000),'utf8');output={saved:name,workspace:'isolated temporary run workspace'};record('WORKSPACE',`Saved ${name} in the isolated run workspace.`);}
+      if(item.name==='spawn_explorer'){if(explorers.length>=MAX_EXPLORERS){output={ok:false,error:`Explorer limit reached (${MAX_EXPLORERS}). Compare the reports already available, then continue from the board.`};record('EXPLORER LIMIT',`The run has reached its ${MAX_EXPLORERS}-explorer branch limit; the main agent must now use its reports.`);}else{const result=await runAnthropicExplorer(key,serialise(env),item.input.task,selectedModel,kind);usage=addUsage(usage,result.usage);emit({type:'usage',usage:usageSummary(selectedModel,usage)});const explorer={name:`Explorer ${explorers.length+1}`,report:result.report};explorers.push(explorer);output=explorer;record('EXPLORER',`${explorer.name}: ${result.report}`);emit({type:'explorer',explorer});}}
+      if(item.name==='write_workspace_file'){const content=String(item.input.content||'').trim();if(!content){output={saved:false,error:'Workspace file content is required. Call write_workspace_file again with content.'};record('WORKSPACE','Skipped an empty helper file; the agent must supply content before saving.');}else{const raw=(item.input.name||'notes.md').replace(/[^a-zA-Z0-9._-]/g,'_').replace(/^\.+/,'').slice(0,80),name=/\.(md|py)$/.test(raw)?raw:`${raw}.md`,folder=join('/private/tmp','agent-arcade-workspaces',runId);await mkdir(folder,{recursive:true});await writeFile(join(folder,name),content.slice(0,6000),'utf8');output={saved:name,workspace:'isolated temporary run workspace'};record('WORKSPACE',`Saved ${name} in the isolated run workspace.`);}}
       toolResults.push({type:'tool_result',tool_use_id:item.id,content:JSON.stringify(output||{ok:false,error:'Unknown tool'})});
     }
-    if(toolResults.length)messages.push({role:'user',content:toolResults});
+    if(toolResults.length){idleToolTurns=0;messages.push({role:'user',content:toolResults});}
     if(isSolved(env))return{ok:true,solved:true,actions:env.actions,traces,explorers,workspace:`/private/tmp/agent-arcade-workspaces/${runId}`,usage:usageSummary(selectedModel,usage)};
-    if(body.stop_reason==='end_turn'&&!toolResults.length){record('REPLAN','The board is still unsolved; requesting the next observation or deliberate action batch.');messages.push({role:'user',content:`The board is not solved. Continue with an observation, delegation, ${mode==='verify'?'self-proposed action check, ':mode==='assist'?'optional solver aid, ':''}or short action batch.`});}
+    if(!assistantBlocks.length)return{ok:false,solved:false,error:'The provider returned an empty assistant turn. The visible board remains unchanged.',traces,explorers,usage:usageSummary(selectedModel,usage)};
+    if(!toolResults.length){idleToolTurns++;if(idleToolTurns>=2)return{ok:false,solved:false,error:'The agent paused twice without selecting a tool. The visible board remains at its last committed state.',traces,explorers,usage:usageSummary(selectedModel,usage)};record('REPLAN','The agent did not select a tool, so it is being asked once more for an observation or short action batch.');messages.push({role:'user',content:`The board is not solved. Continue with an observation, delegation, ${mode==='verify'?'self-proposed action check, ':mode==='assist'?'optional solver aid, ':''}or short action batch. Do not narrate private analysis in text.`});}
   }
   record('RUN LIMIT','The main agent reached its safety turn limit. The visible board remains at the last verified state.');return{ok:false,solved:false,error:'The model reached the safety turn limit before solving. The visible board remains at the last verified state.',traces,explorers,usage:usageSummary(selectedModel,usage)};
 }

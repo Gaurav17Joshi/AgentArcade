@@ -1,0 +1,14 @@
+{
+  "name": "agent-arcade",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Inspectable agent puzzle environments",
+  "type": "module",
+  "engines": {
+    "node": ">=20 <25"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check app.js && node --check server.mjs"
+  }
+}

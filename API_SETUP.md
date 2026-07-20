@@ -2,6 +2,11 @@
 
 Agent Arcade is designed so you never paste an API key into chat or save one in Git.
 
+There are two supported modes:
+
+- **Local development:** use `.env.local` as described below.
+- **Hosted BYOK link:** enter a key in the site’s **API keys** drawer. It stays only in the open tab’s memory, is sent over HTTPS for that provider request, and clears on reload. The host stores no visitor key. See [RENDER_DEPLOY.md](RENDER_DEPLOY.md).
+
 1. In the project folder, copy `.env.example` to `.env.local`.
 2. Open `.env.local` in a local editor and enter your own values:
 
@@ -16,11 +21,11 @@ Agent Arcade is designed so you never paste an API key into chat or save one in 
    node server.mjs
    ```
 
-4. Open `http://127.0.0.1:4173`, click **API keys**, and look for green status dots. A green dot means the local server found a key; it is not a billing or validity check.
+4. Open `http://127.0.0.1:4173`, click **API keys**, and look for green status dots. A green dot means a local or current-tab key is available; use **Test this session key** to verify it with the provider.
 
 If port 4173 is busy, use another local port, for example `PORT=4174 node server.mjs`.
 
-`.env.local` is ignored by Git. The browser never receives or displays the key.
+`.env.local` is ignored by Git. On a local server the browser never receives that environment key. In public BYOK mode, the entered key is not persisted by the browser or server.
 
 ## Live runs available now
 

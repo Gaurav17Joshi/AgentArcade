@@ -1,10 +1,15 @@
 # Asset and puzzle sources
 
-## Cat reference image
+## Jigsaw reference images
 
 - File: `assets/cat.jpg`
 - Source: [Unsplash image delivery URL](https://images.unsplash.com/photo-1518791841217-8f162f1e1131?auto=format&fit=crop&w=1200&q=85)
-- Used locally only as the reference artwork for the Cat 9-piece and Cat 16-piece jigsaws. The app never uploads it anywhere except to the chosen visual-model provider when the user explicitly runs the reference-image agent.
+- File: `assets/dog.jpg` — [Golden retriever photograph, CC0](https://commons.wikimedia.org/wiki/File:Image_of_golden_retriever.jpg).
+- File: `assets/mona-lisa.jpg` — [Mona Lisa by Leonardo da Vinci, public-domain reproduction](https://commons.wikimedia.org/wiki/File:Mona_Lisa.jpg).
+- File: `assets/great-wave.jpg` — [The Great Wave off Kanagawa, public-domain reproduction](https://commons.wikimedia.org/wiki/File:Great_Wave_off_Kanagawa_restored.jpg).
+- File: `assets/starry-night.jpg` — [The Starry Night by Vincent van Gogh, public-domain reproduction](https://commons.wikimedia.org/wiki/File:TheStarryNightByVincentVanGogh.jpg).
+
+They are stored locally so Jigsaw works without third-party image requests and so the cursor runner can safely capture the complete visual board. The app sends the selected reference image to a visual-model provider only when the user explicitly starts a reference-enabled live run.
 
 ## Sokoban levels
 

@@ -55,7 +55,7 @@ const isKlotski=()=>type==='klotski'||type==='cklotski';
 const isJigsaw=()=>type==='jigsaw'||type==='cjigsaw';
 const isMousePuzzle=()=>Boolean(level()?.control==='mouse');
 const wait=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
-const providerHeaders=provider=>sessionKeys[provider]?{'x-agent-arcade-provider-key':sessionKeys[provider]}:{};
+const providerHeaders=provider=>sessionKeys[provider]?{[`x-agent-arcade-${provider}-key`]:sessionKeys[provider]}:{};
 const providerReady=provider=>Boolean(sessionKeys[provider]||serverKeyConfig[provider]);
 async function refreshProviderConfig(){try{serverKeyConfig=await fetch('/api/config',{cache:'no-store'}).then(response=>response.json())}catch{serverKeyConfig={openai:false,anthropic:false,byokOnly:false}}}
 function jigsawScreen(n){const trayRows=Math.ceil((n*n)/4);return{width:1000,height:Math.max(760,350+trayRows*82),board:{x:20,y:40,size:600},reference:{x:670,y:40,size:200},tray:{x:670,y:330,size:68,gap:12,cols:4}}}
